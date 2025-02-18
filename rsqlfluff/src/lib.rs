@@ -6,6 +6,7 @@ use token::Token;
 
 mod lexer;
 mod marker;
+mod matcher;
 mod templater;
 mod token;
 
