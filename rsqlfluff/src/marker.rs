@@ -3,8 +3,11 @@ use std::collections::HashMap;
 use std::ops::{Range, RangeFrom};
 use std::rc::Rc;
 
+use pyo3::{pyclass, pymethods};
+
 use crate::templater::TemplatedFile;
 
+#[pyclass]
 #[derive(Debug, Clone)]
 pub struct PositionMarker {
     pub source_slice: Range<usize>,
@@ -14,7 +17,9 @@ pub struct PositionMarker {
     pub working_line_pos: usize,
 }
 
+#[pymethods]
 impl PositionMarker {
+    #[new]
     pub fn new(
         source_slice: Range<usize>,
         templated_slice: Range<usize>,
@@ -180,35 +185,35 @@ impl PositionMarker {
         )
     }
 
-    pub fn slice_is_point(test_slice: Range<usize>) -> bool {
+    pub fn slice_is_point(test_slice: &Range<usize>) -> bool {
         test_slice.start == test_slice.end
     }
 
-    pub fn is_point(self) -> bool {
-        PositionMarker::slice_is_point(self.source_slice)
-            && PositionMarker::slice_is_point(self.templated_slice)
+    pub fn is_point(&self) -> bool {
+        PositionMarker::slice_is_point(&self.source_slice)
+            && PositionMarker::slice_is_point(&self.templated_slice)
     }
 
-    pub fn with_working_position(self, line_no: usize, line_pos: usize) -> Self {
+    pub fn with_working_position(&self, line_no: usize, line_pos: usize) -> Self {
         PositionMarker {
             working_line_no: line_no,
             working_line_pos: line_pos,
-            ..self
+            ..self.clone()
         }
     }
 
-    pub fn is_literal(self) -> bool {
+    pub fn is_literal(&self) -> bool {
         self.templated_file
-            .is_source_slice_literal(self.source_slice)
+            .is_source_slice_literal(&self.source_slice)
     }
 
-    pub fn source_str(self) -> String {
+    pub fn source_str(&self) -> String {
         self.templated_file.source_str[self.source_slice.start..self.source_slice.end].to_owned()
     }
 
-    pub fn to_source_dict(self) -> HashMap<String, usize> {
+    pub fn to_source_dict(&self) -> HashMap<String, usize> {
         self.templated_file
-            .source_position_dict_from_slice(self.source_slice)
+            .source_position_dict_from_slice(&self.source_slice)
     }
 }
 

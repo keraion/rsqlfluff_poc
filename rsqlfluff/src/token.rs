@@ -1,11 +1,13 @@
 use std::ops::Range;
 
 use crate::{marker::PositionMarker, templater::TemplatedFile};
+use pyo3::{pyclass, pymethods};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 struct MatchGrammar;
 
+#[pyclass]
 #[derive(Debug, Clone)]
 pub struct Token {
     pub token_type: Option<String>,
@@ -26,6 +28,7 @@ pub struct Token {
     pub block_type: Option<String>,
 }
 
+#[pymethods]
 impl Token {
     // pub fn base_token(pos_marker: PositionMarker) -> Self {
     //     let segment_type = "base".to_string();

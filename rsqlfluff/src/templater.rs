@@ -4,6 +4,9 @@ use std::{
     ops::Range,
 };
 
+use pyo3::{pyclass, pymethods, types::PyType, Bound};
+
+#[pyclass]
 #[derive(Debug, Clone, PartialEq)]
 pub struct RawFileSlice {
     pub raw: String, // Source string
@@ -19,6 +22,7 @@ pub struct RawFileSlice {
     pub tag: Option<String>,
 }
 
+#[pymethods]
 impl RawFileSlice {
     pub fn new(raw: String, slice_type: String, source_idx: usize) -> Self {
         RawFileSlice {
@@ -52,6 +56,7 @@ impl RawFileSlice {
     }
 }
 
+#[pyclass]
 #[derive(Debug, Clone, PartialEq)]
 pub struct TemplatedFileSlice {
     pub slice_type: String,
@@ -59,7 +64,9 @@ pub struct TemplatedFileSlice {
     pub templated_slice: Range<usize>,
 }
 
+#[pymethods]
 impl TemplatedFileSlice {
+    #[new]
     pub fn new(
         slice_type: String,
         source_slice: Range<usize>,
@@ -73,6 +80,7 @@ impl TemplatedFileSlice {
     }
 }
 
+#[pyclass]
 #[derive(Debug, Clone, PartialEq)]
 pub struct TemplatedFile {
     pub source_str: String,
@@ -84,7 +92,9 @@ pub struct TemplatedFile {
     templated_newlines: Vec<usize>,
 }
 
+#[pymethods]
 impl TemplatedFile {
+    #[new]
     pub fn new(
         source_str: String,
         fname: String,
@@ -191,7 +201,8 @@ impl TemplatedFile {
         }
     }
 
-    pub fn from_string(raw: String) -> Self {
+    #[classmethod]
+    pub fn from_string(_cls: &Bound<'_, PyType>, raw: String) -> Self {
         TemplatedFile::new(raw, String::from("<string>"), None, None, None)
     }
 
@@ -217,8 +228,8 @@ impl TemplatedFile {
     fn find_slice_indices_of_templated_pos(
         &self,
         templated_pos: usize,
-        start_idx: Option<usize>,
         inclusive: bool,
+        start_idx: Option<usize>,
     ) -> (usize, usize) {
         let start_idx = start_idx.unwrap_or(0);
         let mut first_idx = None;
@@ -431,7 +442,7 @@ impl TemplatedFile {
         insertion_point
     }
 
-    pub fn is_source_slice_literal(&self, source_slice: Range<usize>) -> bool {
+    pub fn is_source_slice_literal(&self, source_slice: &Range<usize>) -> bool {
         // No sliced file? Everything is literal
         if self.raw_sliced.is_empty() {
             return true;
@@ -472,7 +483,7 @@ impl TemplatedFile {
 
     pub fn source_position_dict_from_slice(
         &self,
-        source_slice: Range<usize>,
+        source_slice: &Range<usize>,
     ) -> HashMap<String, usize> {
         let start = self.get_line_pos_of_char_pos(source_slice.start, true);
         let stop = self.get_line_pos_of_char_pos(source_slice.end, true);

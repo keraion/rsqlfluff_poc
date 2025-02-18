@@ -2,6 +2,7 @@ use std::{cmp::min, ops::Range, time::Instant};
 
 use fancy_regex::{Regex, RegexBuilder};
 use once_cell::sync::Lazy;
+use pyo3::{pyclass, pymethods};
 
 use crate::{
     marker::PositionMarker,
@@ -559,13 +560,16 @@ pub fn lex_match<'a>(
         .find_map(|matcher| matcher.scan_match(input))
 }
 
+#[pyclass]
 #[derive(Debug)]
 pub struct SQLLexError {
     msg: String,
     pos_marker: PositionMarker,
 }
 
+#[pymethods]
 impl SQLLexError {
+    #[new]
     fn new(msg: String, pos_marker: PositionMarker) -> Self {
         Self { msg, pos_marker }
     }
@@ -886,6 +890,7 @@ pub fn is_zero_slice(s: &Range<usize>) -> bool {
     s.start == s.end
 }
 
+#[pyclass]
 pub enum LexInput {
     String(String),
     TemplatedFile(TemplatedFile),
