@@ -12,7 +12,6 @@ pub struct Token {
     pub comment_separate: bool,
     pub is_meta: bool,
     pub allow_empty: bool,
-    // additional_kwargs: Vec<String>,
     pub pos_marker: PositionMarker,
     pub raw: String,
     is_whitespace: bool,
@@ -27,26 +26,6 @@ pub struct Token {
 }
 
 impl Token {
-    // pub fn base_token(pos_marker: PositionMarker) -> Self {
-    //     let segment_type = "base".to_string();
-    //     Self {
-    //         segment_type,
-    //         raw,
-    //         pos_marker,
-    //             //     }
-    // }
-
-    // pub fn new(raw: String, pos_marker: PositionMarker) -> Self {
-    //     Self {
-    //         token_type: None,
-    //             //         comment_separate: false,
-    //         is_meta: false,
-    //         allow_empty: false,
-    //         pos_marker,
-    //         raw,
-    //     }
-    // }
-
     pub fn raw_token(raw: String, pos_marker: PositionMarker) -> Self {
         Self {
             token_type: Some("raw".to_string()),

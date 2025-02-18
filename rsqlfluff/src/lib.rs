@@ -3,6 +3,7 @@ use pyo3::prelude::*;
 mod token;
 mod lexer;
 mod marker;
+mod matcher;
 mod templater;
 
 /// Formats the sum of two numbers as string.
