@@ -1,6 +1,6 @@
-use std::ops::Range;
+use std::{fmt::Display, ops::Range, sync::Arc};
 
-use crate::{marker::PositionMarker, templater::TemplatedFile};
+use crate::{marker::PositionMarker, slice::Slice, templater::TemplatedFile};
 use pyo3::{pyclass, pymethods};
 use uuid::Uuid;
 
@@ -27,7 +27,6 @@ pub struct Token {
     pub block_type: Option<String>,
 }
 
-#[pymethods]
 impl Token {
     pub fn raw_token(raw: String, pos_marker: PositionMarker) -> Self {
         Self {
@@ -207,10 +206,10 @@ impl Token {
     }
 
     pub fn template_placeholder_token_from_slice(
-        source_slice: Range<usize>,
-        templated_slice: Range<usize>,
+        source_slice: Slice,
+        templated_slice: Slice,
         block_type: String,
-        templated_file: &TemplatedFile,
+        templated_file: &Arc<TemplatedFile>,
         block_uuid: Option<Uuid>,
     ) -> Self {
         let pos_marker = PositionMarker::new(
@@ -223,10 +222,29 @@ impl Token {
         Self {
             ..Self::template_placeholder_token(
                 pos_marker,
-                templated_file.source_str[source_slice].to_string(),
+                templated_file.source_str[source_slice.as_range()].to_string(),
                 block_type,
                 block_uuid,
             )
         }
+    }
+}
+
+impl Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "<{}: ({}) '{}'>",
+            self.token_type.clone().unwrap_or("unknown".to_string()),
+            self.pos_marker,
+            self.raw.escape_debug()
+        )
+    }
+}
+
+#[pymethods]
+impl Token {
+    pub fn __repr__(&self) -> String {
+        format!("{}", self)
     }
 }

@@ -1,11 +1,15 @@
-use std::{cmp::min, ops::Range, time::Instant};
+use std::sync::Arc;
 
-use fancy_regex::{Regex, RegexBuilder};
-use once_cell::sync::Lazy;
 use pyo3::{pyclass, pymethods};
 
 use crate::{
-    marker::PositionMarker, matcher::{ansi_lexers, LexMatcher, LexedElement}, templater::{RawFileSlice, TemplatedFile, TemplatedFileSlice}, token::Token
+    marker::PositionMarker,
+    matcher::{ansi_lexers, LexMatcher, LexedElement},
+    slice::Slice,
+    templater::{TemplatedFile, TemplatedFileSlice},
+    token::Token,
+    Dialect,
+    get_lexers,
 };
 
 use std::{
@@ -20,7 +24,7 @@ use itertools::multipeek;
 
 pub struct BlockTracker {
     stack: Vec<Uuid>,
-    map: HashMap<Range<usize>, Uuid>,
+    map: HashMap<Slice, Uuid>,
 }
 
 impl BlockTracker {
@@ -33,7 +37,7 @@ impl BlockTracker {
     }
 
     /// Enter a block given a source slice (start, end).
-    pub fn enter(&mut self, src_slice: Range<usize>) {
+    pub fn enter(&mut self, src_slice: Slice) {
         let uuid = self
             .map
             .entry(src_slice.clone())
@@ -88,8 +92,8 @@ impl BlockTracker {
 #[derive(Debug)]
 pub struct TemplateElement {
     pub raw: String,
-    pub template_slice: Range<usize>, // Slice equivalent
-    pub matcher: LexMatcher,          // Reference to the lexer that matched this element
+    pub template_slice: Slice, // Slice equivalent
+    pub matcher: LexMatcher,   // Reference to the lexer that matched this element
 }
 
 impl Display for TemplateElement {
@@ -104,7 +108,7 @@ impl Display for TemplateElement {
 
 impl TemplateElement {
     // Constructor to create a TemplateElement from a LexedElement and a template slice
-    pub fn from_element(element: &LexedElement, template_slice: Range<usize>) -> Self {
+    pub fn from_element(element: &LexedElement, template_slice: Slice) -> Self {
         Self {
             raw: element.raw.to_string(),
             template_slice,
@@ -176,8 +180,8 @@ pub fn lex_match<'a>(
 #[pyclass]
 #[derive(Debug)]
 pub struct SQLLexError {
-    msg: String,
-    pos_marker: PositionMarker,
+    pub msg: String,
+    pub pos_marker: PositionMarker,
 }
 
 #[pymethods]
@@ -197,7 +201,7 @@ pub fn map_template_slices(
 
     for element in elements {
         let element_len = element.raw.len();
-        let template_slice = idx..idx + element_len;
+        let template_slice = Slice::from(idx..idx + element_len);
         idx += element_len;
 
         // Create a TemplateElement from the LexedElement and the template slice
@@ -205,10 +209,11 @@ pub fn map_template_slices(
         templated_buff.push(templated_element);
 
         // Validate that the slice matches the element's raw content
-        if template.templated_str[template_slice.clone()] != *element.raw {
+        if template.templated_str[template_slice.as_range()] != *element.raw {
             panic!(
                 "Template and lexed elements do not match. This should never happen  {:?} != {:?}",
-                &element.raw, &template.templated_str[template_slice]
+                &element.raw,
+                &template.templated_str[template_slice.as_range()]
             )
         }
     }
@@ -218,7 +223,7 @@ pub fn map_template_slices(
 
 fn elements_to_tokens(
     elements: &[TemplateElement],
-    templated_file: &TemplatedFile,
+    templated_file: &Arc<TemplatedFile>,
     template_blocks_indent: bool,
 ) -> Vec<Token> {
     log::info!("Elements to Segments.");
@@ -244,7 +249,7 @@ fn elements_to_tokens(
 
 fn iter_tokens(
     lexed_elements: &[TemplateElement],
-    templated_file: &TemplatedFile,
+    templated_file: &Arc<TemplatedFile>,
     add_indents: bool,
 ) -> Vec<Token> {
     let mut tfs_idx = 0;
@@ -288,9 +293,11 @@ fn iter_tokens(
 
                             segments.push(element.to_token(
                                 PositionMarker::new(
-                                    slice_start..(element.template_slice.end + tfs_offset),
+                                    Slice::from(
+                                        slice_start..(element.template_slice.end + tfs_offset),
+                                    ),
                                     element.template_slice.clone(),
-                                    &templated_file,
+                                    templated_file,
                                     None,
                                     None,
                                 ),
@@ -308,10 +315,14 @@ fn iter_tokens(
                                 tfs.templated_slice.end - element.template_slice.start;
                             segments.push(element.to_token(
                                 PositionMarker::new(
-                                    (element.template_slice.start + consumed_length + tfs_offset)
-                                        ..tfs.templated_slice.end + tfs_offset,
+                                    Slice::from(
+                                        (element.template_slice.start
+                                            + consumed_length
+                                            + tfs_offset)
+                                            ..tfs.templated_slice.end + tfs_offset,
+                                    ),
                                     element.template_slice.clone(),
-                                    &templated_file,
+                                    templated_file,
                                     None,
                                     None,
                                 ),
@@ -332,7 +343,7 @@ fn iter_tokens(
                                     stashed_source_idx.unwrap_or(tfs.source_slice.start);
                                 segments.push(element.to_token(
                                     PositionMarker::new(
-                                        slice_start..tfs.source_slice.end,
+                                        Slice::from(slice_start..tfs.source_slice.end),
                                         element.template_slice.clone(),
                                         &templated_file,
                                         None,
@@ -375,7 +386,7 @@ fn handle_zero_length_slice(
     tfs: &TemplatedFileSlice,
     next_tfs: Option<&&TemplatedFileSlice>,
     block_stack: &mut BlockTracker,
-    templated_file: &TemplatedFile,
+    templated_file: &Arc<TemplatedFile>,
     add_indents: bool,
 ) -> impl Iterator<Item = Token> {
     let mut segments = Vec::new();
@@ -468,7 +479,7 @@ fn handle_zero_length_slice(
                 .to_string();
             log::debug!("Forward jump detected. Inserting placeholder");
             let pos_marker = PositionMarker::new(
-                tfs.source_slice.end..next_tfs.unwrap().source_slice.start,
+                Slice::from(tfs.source_slice.end..next_tfs.unwrap().source_slice.start),
                 tfs.templated_slice.clone(),
                 templated_file,
                 None,
@@ -499,30 +510,31 @@ fn handle_zero_length_slice(
     segments.into_iter()
 }
 
-pub fn is_zero_slice(s: &Range<usize>) -> bool {
+pub fn is_zero_slice(s: &Slice) -> bool {
     s.start == s.end
 }
 
 #[pyclass]
+#[derive(Clone)]
 pub enum LexInput {
     String(String),
     TemplatedFile(TemplatedFile),
 }
 
-pub fn lex(raw: LexInput, template_blocks_indent: bool) -> (Vec<Token>, Vec<SQLLexError>) {
+pub fn lex(raw: LexInput, template_blocks_indent: bool, dialect: Dialect) -> (Vec<Token>, Vec<SQLLexError>) {
     let (template, str_buff) = match raw {
         LexInput::String(raw_str) => {
-            let template = TemplatedFile::from_string(raw_str.clone());
-            (template, raw_str)
+            let template = TemplatedFile::from(raw_str.clone());
+            (Arc::new(template), raw_str)
         }
         LexInput::TemplatedFile(template_file) => {
             let str_buff = template_file.to_string();
-            (template_file, str_buff)
+            (Arc::new(template_file), str_buff)
         }
     };
 
     // TODO: handle more matchers
-    let matcher = ansi_lexers();
+    let matcher = get_lexers(dialect);
     let last_resort_lexer = LexMatcher::regex_lexer(
         "<unlexable>",
         r#"[^\t\n\ ]*"#,
@@ -617,7 +629,7 @@ mod tests {
         ];
 
         for (raw, res) in test_cases {
-            let (tokens, _) = lex(LexInput::String(raw.to_string()), true);
+            let (tokens, _) = lex(LexInput::String(raw.to_string()), true, Dialect::Ansi);
             for token in &tokens {
                 println!("{:?}", token);
             }
@@ -632,7 +644,7 @@ mod tests {
         FROM table_2 WHERE a / b = 3   "  ;"#
                 .to_string(),
         );
-        let (_tokens, violations) = lex(raw, true);
+        let (_tokens, violations) = lex(raw, true, Dialect::Ansi);
 
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].msg, "Unable to lex characters: \"");
@@ -649,12 +661,12 @@ mod tests {
         );
         let (template, str_buff) = match raw {
             LexInput::String(raw_str) => {
-                let template = TemplatedFile::from_string(raw_str.clone());
-                (template, raw_str)
+                let template = TemplatedFile::from(raw_str.clone());
+                (Arc::new(template), raw_str)
             }
             LexInput::TemplatedFile(template_file) => {
                 let str_buff = template_file.to_string();
-                (template_file, str_buff)
+                (Arc::new(template_file), str_buff)
             }
         };
 
@@ -983,12 +995,12 @@ SELECT * FROM "_1234логистика"."_1234εμπορικός";
         );
         let (template, str_buff) = match raw {
             LexInput::String(raw_str) => {
-                let template = TemplatedFile::from_string(raw_str.clone());
-                (template, raw_str)
+                let template = TemplatedFile::from(raw_str.clone());
+                (Arc::new(template), raw_str)
             }
             LexInput::TemplatedFile(template_file) => {
                 let str_buff = template_file.to_string();
-                (template_file, str_buff)
+                (Arc::new(template_file), str_buff)
             }
         };
 

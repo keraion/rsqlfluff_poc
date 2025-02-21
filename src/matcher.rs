@@ -9,6 +9,7 @@ use crate::{marker::PositionMarker, token::Token};
 pub enum LexerMode {
     String(String), // Match a literal string
     Regex(Regex),   // Match using a regex
+    Function(Fn(&str) -> String),
 }
 
 impl Display for LexerMode {
@@ -16,6 +17,7 @@ impl Display for LexerMode {
         match *self {
             LexerMode::Regex(_) => write!(f, "RegexMatcher"),
             LexerMode::String(_) => write!(f, "StringMatcher"),
+            LexerMode::Function(_) => write!(f, "FunctionMatcher"),
         }
     }
 }
@@ -69,6 +71,7 @@ impl LexMatcher {
         token_class_func: fn(String, PositionMarker) -> Token,
         subdivider: Option<Box<LexMatcher>>,
         trim_post_subdivide: Option<Box<LexMatcher>>,
+        fallback_lexer: Option<fn(&str) -> String>,
     ) -> Self {
         let pattern = format!(r"(?s)\A(?:{})", template);
         // let pattern = format!(r"(?s){}", template);
@@ -77,6 +80,8 @@ impl LexMatcher {
             mode: LexerMode::Regex(
                 RegexBuilder::new(&pattern)
                     .build()
+                    .map(LexerMode::Regex)
+                    .map_err(fallback_lexer.expect("No fallback matcher").map(LexerMode::Function))
                     .expect("Failed to compile regex"),
             ),
             token_class_func,
@@ -96,11 +101,11 @@ impl LexMatcher {
         // let pattern = format!(r"(?s){}", template);
         Self {
             name: name.to_string(),
-            mode: LexerMode::Regex(
-                RegexBuilder::new(&pattern)
+            mode: RegexBuilder::new(&pattern)
                     .build()
+                    .map(LexerMode::Regex)
+                    .map_err(LexerMode::Function)
                     .expect("Failed to compile regex"),
-            ),
             token_class_func,
             subdivider,
             trim_post_subdivide,
@@ -266,121 +271,36 @@ impl LexMatcher {
     }
 }
 
-pub static LEXERS: Lazy<Vec<LexMatcher>> = Lazy::new(|| {
-    vec![
-        LexMatcher::regex_lexer(
-            "whitespace",
-            r"[^\S\r\n]+",
-            Token::whitespace_token,
-            None,
-            None,
-        ),
-        LexMatcher::regex_lexer(
-            "inline_comment",
-            r"(?:--|#)[^\n]*",
-            Token::comment_token,
-            None,
-            None,
-        ),
-        LexMatcher::regex_lexer(
-            "block_comment",
-            r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/",
-            Token::comment_token,
-            Some(Box::new(LexMatcher::regex_subdivider(
-                "newline",
-                r"\r?\n",
-                Token::newline_token,
-                None,
-                None,
-            ))),
-            Some(Box::new(LexMatcher::regex_subdivider(
-                "whitespace",
-                r"[^\S\r\n]+",
-                Token::whitespace_token,
-                None,
-                None,
-            ))),
-        ),
-        LexMatcher::regex_lexer(
-            "single_quote",
-            r"'(?:[^'\\]|\\.|'')*'",
-            Token::code_token,
-            None,
-            None,
-        ),
-        LexMatcher::regex_lexer(
-            "double_quote",
-            r#""(?:""|[^"\\]|\\.)*""#,
-            Token::code_token,
-            None,
-            None,
-        ),
-        LexMatcher::regex_lexer(
-            "back_quote",
-            r"`(?:[^`\\]|\\.)*`",
-            Token::code_token,
-            None,
-            None,
-        ),
-        LexMatcher::regex_lexer(
-            "dollar_quote",
-            r"\$(\w*)\$.*?\$\1\$",
-            Token::code_token,
-            None,
-            None,
-        ),
-        LexMatcher::regex_lexer(
-            "numeric_literal",
-            // r"(?>\d+\.\d+|\d+\.(?![\.\w])|\.\d+|\d+)(\.?[eE][+-]?\d+)?((?<=\.)|(?=\b))",
-            r"\d+\.\d+|\d+\.(?!\.)|\.\d+|\d+(?:[eE][+-]?\d+)?\b",
-            Token::literal_token,
-            None,
-            None,
-        ),
-        LexMatcher::regex_lexer(
-            "like_operator",
-            r"!?~~?\*?",
-            Token::comparison_operator_token,
-            None,
-            None,
-        ),
-        LexMatcher::regex_lexer("newline", r"\r?\n", Token::newline_token, None, None),
-        LexMatcher::string_lexer("casting_operator", "::", Token::code_token, None, None),
-        LexMatcher::string_lexer("equals", "=", Token::code_token, None, None),
-        LexMatcher::string_lexer("greater_than", ">", Token::code_token, None, None),
-        LexMatcher::string_lexer("less_than", "<", Token::code_token, None, None),
-        LexMatcher::string_lexer("not", "!", Token::code_token, None, None),
-        LexMatcher::string_lexer("dot", ".", Token::code_token, None, None),
-        LexMatcher::string_lexer("comma", ",", Token::code_token, None, None),
-        LexMatcher::string_lexer("plus", "+", Token::code_token, None, None),
-        LexMatcher::string_lexer("minus", "-", Token::code_token, None, None),
-        LexMatcher::string_lexer("divide", "/", Token::code_token, None, None),
-        LexMatcher::string_lexer("percent", "%", Token::code_token, None, None),
-        LexMatcher::string_lexer("question", "?", Token::code_token, None, None),
-        LexMatcher::string_lexer("ampersand", "&", Token::code_token, None, None),
-        LexMatcher::string_lexer("vertical_bar", "|", Token::code_token, None, None),
-        LexMatcher::string_lexer("caret", "^", Token::code_token, None, None),
-        LexMatcher::string_lexer("star", "*", Token::code_token, None, None),
-        LexMatcher::string_lexer("start_bracket", "(", Token::code_token, None, None),
-        LexMatcher::string_lexer("end_bracket", ")", Token::code_token, None, None),
-        LexMatcher::string_lexer("start_square_bracket", "[", Token::code_token, None, None),
-        LexMatcher::string_lexer("end_square_bracket", "]", Token::code_token, None, None),
-        LexMatcher::string_lexer("start_curly_bracket", "{", Token::code_token, None, None),
-        LexMatcher::string_lexer("end_curly_bracket", "}", Token::code_token, None, None),
-        LexMatcher::string_lexer("colon", ":", Token::code_token, None, None),
-        LexMatcher::string_lexer("semicolon", ";", Token::code_token, None, None),
-        // This is the "fallback" lexer for anything else which looks like SQL.
-        // LexMatcher::regex_lexer("word", r"[0-9a-zA-Z_]+", Token::word_token),
-        LexMatcher::regex_lexer(
-            "word",
-            r"[\p{L}_][\p{L}\p{N}_$]*\b",
-            Token::word_token,
-            None,
-            None,
-        ),
-    ]
-});
+fn extract_nested_block_comment(input: &str) -> Option<String> {
+    let mut chars = input.chars().peekable();
+    let mut comment = String::new();
+    
+    // Ensure the input starts with "/*"
+    if chars.next() != Some('/') || chars.next() != Some('*') {
+        return None;
+    }
 
-pub fn ansi_lexers() -> &'static Vec<LexMatcher> {
-    &LEXERS
+    comment.push_str("/*"); // Add the opening delimiter
+    let mut depth = 1; // Track nesting level
+
+    while let Some(c) = chars.next() {
+        comment.push(c);
+
+        if c == '/' && chars.peek() == Some(&'*') {
+            chars.next(); // Consume '*'
+            comment.push('*');
+            depth += 1;
+        } else if c == '*' && chars.peek() == Some(&'/') {
+            chars.next(); // Consume '/'
+            comment.push('/');
+            depth -= 1;
+
+            if depth == 0 {
+                return Some(comment);
+            }
+        }
+    }
+
+    // If we reach here, the comment wasn't properly closed
+    None
 }

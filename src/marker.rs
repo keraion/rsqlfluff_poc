@@ -1,29 +1,28 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::ops::{Range, RangeFrom};
-use std::rc::Rc;
+use std::fmt::Display;
+use std::sync::Arc;
 
-use pyo3::{pyclass, pymethods};
+use pyo3::pyclass;
 
+use crate::slice::Slice;
 use crate::templater::TemplatedFile;
 
 #[pyclass]
 #[derive(Debug, Clone)]
 pub struct PositionMarker {
-    pub source_slice: Range<usize>,
-    pub templated_slice: Range<usize>,
-    pub templated_file: TemplatedFile,
+    pub source_slice: Slice,
+    pub templated_slice: Slice,
+    pub templated_file: Arc<TemplatedFile>,
     pub working_line_no: usize,
     pub working_line_pos: usize,
 }
 
-#[pymethods]
 impl PositionMarker {
-    #[new]
     pub fn new(
-        source_slice: Range<usize>,
-        templated_slice: Range<usize>,
-        templated_file: &TemplatedFile,
+        source_slice: Slice,
+        templated_slice: Slice,
+        templated_file: &Arc<TemplatedFile>,
         working_line_no: Option<usize>,
         working_line_pos: Option<usize>,
     ) -> Self {
@@ -35,7 +34,7 @@ impl PositionMarker {
         Self {
             source_slice,
             templated_slice,
-            templated_file: templated_file.clone(),
+            templated_file: Arc::clone(templated_file),
             working_line_no,
             working_line_pos,
         }
@@ -67,79 +66,6 @@ impl PositionMarker {
         } else {
             (line_no, line_pos + raw.len() as usize)
         }
-    }
-
-    pub fn from_point(
-        source_point: usize,
-        templated_point: usize,
-        templated_file: &TemplatedFile,
-        working_line_no: Option<usize>,
-        working_line_pos: Option<usize>,
-    ) -> Self {
-        let source_slice = source_point..source_point;
-        let templated_slice = templated_point..templated_point;
-
-        PositionMarker::new(
-            source_slice,
-            templated_slice,
-            templated_file,
-            working_line_no,
-            working_line_pos,
-        )
-    }
-
-    pub fn from_points(start_marker: &PositionMarker, end_marker: &PositionMarker) -> Self {
-        if start_marker.templated_file != end_marker.templated_file {
-            panic!("Markers must refer to the same templated file.");
-        }
-
-        PositionMarker::new(
-            start_marker.source_slice.clone(),
-            start_marker.templated_slice.clone(),
-            &start_marker.templated_file,
-            Some(start_marker.working_line_no),
-            Some(start_marker.working_line_pos),
-        )
-    }
-
-    pub fn from_child_markers(markers: &[Option<&PositionMarker>]) -> Self {
-        let valid_markers: Vec<&PositionMarker> = markers.iter().filter_map(|m| *m).collect();
-
-        if valid_markers.is_empty() {
-            panic!("No valid markers provided.");
-        }
-
-        let source_slice = valid_markers
-            .iter()
-            .map(|m| m.source_slice.start)
-            .min()
-            .unwrap()
-            ..valid_markers
-                .iter()
-                .map(|m| m.source_slice.end)
-                .max()
-                .unwrap();
-
-        let templated_slice = valid_markers
-            .iter()
-            .map(|m| m.templated_slice.start)
-            .min()
-            .unwrap()
-            ..valid_markers
-                .iter()
-                .map(|m| m.templated_slice.end)
-                .max()
-                .unwrap();
-
-        let templated_file = valid_markers[0].templated_file.clone();
-
-        PositionMarker::new(
-            source_slice,
-            templated_slice,
-            &templated_file,
-            Some(valid_markers[0].working_line_no),
-            Some(valid_markers[0].working_line_pos),
-        )
     }
 
     pub fn source_position(&self) -> (usize, usize) {
@@ -185,13 +111,8 @@ impl PositionMarker {
         )
     }
 
-    pub fn slice_is_point(test_slice: &Range<usize>) -> bool {
-        test_slice.start == test_slice.end
-    }
-
     pub fn is_point(&self) -> bool {
-        PositionMarker::slice_is_point(&self.source_slice)
-            && PositionMarker::slice_is_point(&self.templated_slice)
+        slice_is_point(&self.source_slice) && slice_is_point(&self.templated_slice)
     }
 
     pub fn with_working_position(&self, line_no: usize, line_pos: usize) -> Self {
@@ -215,6 +136,83 @@ impl PositionMarker {
         self.templated_file
             .source_position_dict_from_slice(&self.source_slice)
     }
+
+    pub fn from_point(
+        source_point: usize,
+        templated_point: usize,
+        templated_file: &Arc<TemplatedFile>,
+        working_line_no: Option<usize>,
+        working_line_pos: Option<usize>,
+    ) -> Self {
+        let source_slice = Slice::from(source_point..source_point);
+        let templated_slice = Slice::from(templated_point..templated_point);
+
+        PositionMarker::new(
+            source_slice,
+            templated_slice,
+            templated_file,
+            working_line_no,
+            working_line_pos,
+        )
+    }
+
+    pub fn from_points(start_marker: &PositionMarker, end_marker: &PositionMarker) -> Self {
+        if start_marker.templated_file != end_marker.templated_file {
+            panic!("Markers must refer to the same templated file.");
+        }
+
+        PositionMarker::new(
+            start_marker.source_slice.clone(),
+            start_marker.templated_slice.clone(),
+            &start_marker.templated_file,
+            Some(start_marker.working_line_no),
+            Some(start_marker.working_line_pos),
+        )
+    }
+
+    pub fn from_child_markers(markers: &[Option<&PositionMarker>]) -> Self {
+        let valid_markers: Vec<&PositionMarker> = markers.iter().filter_map(|m| *m).collect();
+
+        if valid_markers.is_empty() {
+            panic!("No valid markers provided.");
+        }
+
+        let source_slice = Slice::from(
+            valid_markers
+                .iter()
+                .map(|m| m.source_slice.start)
+                .min()
+                .unwrap()
+                ..valid_markers
+                    .iter()
+                    .map(|m| m.source_slice.end)
+                    .max()
+                    .unwrap(),
+        );
+
+        let templated_slice = Slice::from(
+            valid_markers
+                .iter()
+                .map(|m| m.templated_slice.start)
+                .min()
+                .unwrap()
+                ..valid_markers
+                    .iter()
+                    .map(|m| m.templated_slice.end)
+                    .max()
+                    .unwrap(),
+        );
+
+        let templated_file = valid_markers[0].templated_file.clone();
+
+        PositionMarker::new(
+            source_slice,
+            templated_slice,
+            &templated_file,
+            Some(valid_markers[0].working_line_no),
+            Some(valid_markers[0].working_line_pos),
+        )
+    }
 }
 
 impl Eq for PositionMarker {}
@@ -235,4 +233,14 @@ impl Ord for PositionMarker {
     fn cmp(&self, other: &Self) -> Ordering {
         self.working_loc().cmp(&other.working_loc())
     }
+}
+
+impl Display for PositionMarker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_source_string())
+    }
+}
+
+pub fn slice_is_point(test_slice: &Slice) -> bool {
+    test_slice.start == test_slice.end
 }
