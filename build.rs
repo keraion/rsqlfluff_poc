@@ -7,7 +7,7 @@ fn main() {
     let dest_path = Path::new(&out_dir).join("dialect_matcher.rs");
 
     // Run Python script to generate Rust lexer definitions
-    let output = Command::new("python3")
+    let output = Command::new("python")
         .arg("utils/build_lexers.py") // Python script that converts lexers to Rust
         .output()
         .expect("Failed to execute Python script");
