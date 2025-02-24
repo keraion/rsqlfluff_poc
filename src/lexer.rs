@@ -674,7 +674,7 @@ mod tests {
             }
         };
 
-        let matcher = ansi_lexers();
+        let matcher = get_lexers(Dialect::Ansi);
         let last_resort_lexer = LexMatcher::regex_lexer(
             "<unlexable>",
             r#"[^\t\n\ ]*"#,
@@ -714,7 +714,7 @@ mod tests {
     #[test]
     fn test_scan_broken_quotes() {
         env_logger::init();
-        let matcher = ansi_lexers();
+        let matcher = get_lexers(Dialect::Ansi);;
         let last_resort_lexer = LexMatcher::regex_lexer(
             "<unlexable>",
             r"[^\t\n\ ]*",
@@ -722,7 +722,7 @@ mod tests {
             None,
             None,
             None,
-            (|_| true),
+            |_| true,
         );
         let test_case = lex_string(
             r#"SELECT 1 
@@ -1012,7 +1012,7 @@ SELECT * FROM "_1234логистика"."_1234εμπορικός";
             }
         };
 
-        let matcher = ansi_lexers();
+        let matcher = get_lexers(Dialect::Ansi);
         let last_resort_lexer = LexMatcher::regex_lexer(
             "<unlexable>",
             r#"[^\t\n\ ]*"#,
@@ -1020,7 +1020,7 @@ SELECT * FROM "_1234логистика"."_1234εμπορικός";
             None,
             None,
             None,
-            (|_| true),
+            |_| true,
         );
         let t0 = Instant::now();
         let test_case = lex_string(&str_buff, &matcher, &last_resort_lexer);

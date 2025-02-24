@@ -52,6 +52,7 @@ def generate_lexers():
     print("use once_cell::sync::Lazy;")
     print("use crate::matcher::{LexMatcher, extract_nested_block_comment};")
     print("use std::str::FromStr;")
+    print("use crate::token::Token;")
     print()
     for dialect in dialect_readout():
         loaded_dialect = dialect_selector(dialect.label)
@@ -116,6 +117,6 @@ def _as_rust_lexer_matcher(lexer_matcher: LexerType, is_subdivide=False):
         {is_match_valid}
     )"""
 
-
+print("/* This is a generated file! */")
 generate_lexers()
 generate_dialect_enum()
