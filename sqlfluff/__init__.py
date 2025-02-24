@@ -31,17 +31,19 @@ sql = """CREATE TABLE users (
     DELETE FROM users WHERE id = 2;
 """
 
-start = time.time()
-print(rsql.lex(sql, True, "ansi"))
-end = time.time()
-print(end - start)
+rs_start = time.time()
+rs_out = rsql.lex(sql, True, "ansi")
+rs_end = time.time()
+print(rs_end - rs_start)
 
 
 lexer = Lexer(dialect="ansi")
-start = time.time()
-print(lexer.lex(sql))
-end = time.time()
-print(end - start)
+py_start = time.time()
+py_out = lexer.lex(sql)
+py_end = time.time()
+print(py_end - py_start)
+print(((py_end - py_start) - (rs_end - rs_start)) / (py_end - py_start))
+print(f"Speedup: {(py_end - py_start) / (rs_end - rs_start)}")
 
 sql2 = """SELECT amount+1 AS 'amount' FROM num1;
 
@@ -302,19 +304,24 @@ SELECT * FROM p$ublic1_$.s$ales1_$;
 SELECT * FROM "12логистика"."12344εμπορικός";
 SELECT * FROM "_1234логистика"."_1234εμπορικός";"""
 
-start = time.time()
-rs_out = rsql.lex(sql2, True, "vertica")
-end = time.time()
-print(end - start)
-
-
 lexer = Lexer(dialect="vertica")
-start = time.time()
+py_start = time.time()
 py_out = lexer.lex(sql2)
-end = time.time()
-print(end - start)
+py_end = time.time()
 
-sql3 = """-- Test qualifying datatype with schema
+rs_start = time.time()
+rs_out = rsql.lex(sql2, True, "vertica")
+rs_end = time.time()
+# print(rs_out)
+
+print(py_end - py_start)
+print(rs_end - rs_start)
+print(((py_end - py_start) - (rs_end - rs_start)) / (py_end - py_start))
+print(f"Speedup: {(py_end - py_start) / (rs_end - rs_start)}")
+
+
+sql3 = """/* start with nested /* comments */ */
+-- Test qualifying datatype with schema
 CREATE TABLE counters (
     my_type public.MY_TYPE
 );
@@ -677,16 +684,21 @@ CREATE TABLE IF NOT EXISTS table2(
   REFERENCES table1 (col1, col2)
   ON DELETE SET DEFAULT (col1)
 );
+
+/* end with nested /* comments */ */
 """
 
-start = time.time()
-rs_out = rsql.lex(sql3, True, "postgres")
-end = time.time()
-print(end - start)
-
-
 lexer = Lexer(dialect="postgres")
-start = time.time()
+py_start = time.time()
 py_out = lexer.lex(sql3)
-end = time.time()
-print(end - start)
+py_end = time.time()
+
+rs_start = time.time()
+rs_out = rsql.lex(sql3, True, "postgres")
+rs_end = time.time()
+# print(rs_out)
+
+print(py_end - py_start)
+print(rs_end - rs_start)
+print(((py_end - py_start) - (rs_end - rs_start)) / (py_end - py_start))
+print(f"Speedup: {(py_end - py_start) / (rs_end - rs_start)}")

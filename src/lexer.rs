@@ -3,13 +3,13 @@ use std::sync::Arc;
 use pyo3::{pyclass, pymethods};
 
 use crate::{
+    get_lexers,
     marker::PositionMarker,
-    matcher::{ansi_lexers, LexMatcher, LexedElement},
+    matcher::{LexMatcher, LexedElement},
     slice::Slice,
     templater::{TemplatedFile, TemplatedFileSlice},
     token::Token,
     Dialect,
-    get_lexers,
 };
 
 use std::{
@@ -151,10 +151,9 @@ pub fn lex_string<'a>(
     let mut element_buffer: Vec<LexedElement> = Vec::with_capacity(input.len());
 
     while !input.is_empty() {
-        if let Some(elements) =
+        if let Some((elements, match_length)) =
             lex_match(input, lexer_matchers).or_else(|| last_resort_lexer.scan_match(input))
         {
-            let match_length = elements.iter().fold(0, |acc, e| acc + e.raw.len());
             element_buffer.extend(elements);
             input = &input[match_length..];
         } else {
@@ -171,7 +170,7 @@ pub fn lex_string<'a>(
 pub fn lex_match<'a>(
     input: &'a str,
     lexer_matchers: &'a [LexMatcher],
-) -> Option<Vec<LexedElement<'a>>> {
+) -> Option<(Vec<LexedElement<'a>>, usize)> {
     lexer_matchers
         .iter()
         .find_map(|matcher| matcher.scan_match(input))
@@ -521,7 +520,11 @@ pub enum LexInput {
     TemplatedFile(TemplatedFile),
 }
 
-pub fn lex(raw: LexInput, template_blocks_indent: bool, dialect: Dialect) -> (Vec<Token>, Vec<SQLLexError>) {
+pub fn lex(
+    raw: LexInput,
+    template_blocks_indent: bool,
+    dialect: Dialect,
+) -> (Vec<Token>, Vec<SQLLexError>) {
     let (template, str_buff) = match raw {
         LexInput::String(raw_str) => {
             let template = TemplatedFile::from(raw_str.clone());
@@ -533,7 +536,6 @@ pub fn lex(raw: LexInput, template_blocks_indent: bool, dialect: Dialect) -> (Ve
         }
     };
 
-    // TODO: handle more matchers
     let matcher = get_lexers(dialect);
     let last_resort_lexer = LexMatcher::regex_lexer(
         "<unlexable>",
@@ -541,6 +543,8 @@ pub fn lex(raw: LexInput, template_blocks_indent: bool, dialect: Dialect) -> (Ve
         Token::unlexable_token,
         None,
         None,
+        None,
+        |_| true,
     );
 
     let lexed_elements = lex_string(&str_buff, &matcher, &last_resort_lexer);
@@ -677,6 +681,8 @@ mod tests {
             Token::unlexable_token,
             None,
             None,
+            None,
+            (|_| true),
         );
         let test_case = lex_string(
             r#"SELECT 1 
@@ -715,6 +721,8 @@ mod tests {
             Token::unlexable_token,
             None,
             None,
+            None,
+            (|_| true),
         );
         let test_case = lex_string(
             r#"SELECT 1 
@@ -1011,6 +1019,8 @@ SELECT * FROM "_1234логистика"."_1234εμπορικός";
             Token::unlexable_token,
             None,
             None,
+            None,
+            (|_| true),
         );
         let t0 = Instant::now();
         let test_case = lex_string(&str_buff, &matcher, &last_resort_lexer);

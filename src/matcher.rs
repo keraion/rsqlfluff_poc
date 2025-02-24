@@ -1,21 +1,20 @@
 use std::fmt::Display;
 
 use fancy_regex::{Regex, RegexBuilder};
-use once_cell::sync::Lazy;
 
 use crate::{marker::PositionMarker, token::Token};
 
 #[derive(Debug, Clone)]
 pub enum LexerMode {
-    String(String), // Match a literal string
-    Regex(Regex),   // Match using a regex
-    Function(Fn(&str) -> String),
+    String(String),                 // Match a literal string
+    Regex(Regex, fn(&str) -> bool), // Match using a regex
+    Function(fn(&str) -> Option<&str>),
 }
 
 impl Display for LexerMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
-            LexerMode::Regex(_) => write!(f, "RegexMatcher"),
+            LexerMode::Regex(_, _) => write!(f, "RegexMatcher"),
             LexerMode::String(_) => write!(f, "StringMatcher"),
             LexerMode::Function(_) => write!(f, "FunctionMatcher"),
         }
@@ -71,19 +70,24 @@ impl LexMatcher {
         token_class_func: fn(String, PositionMarker) -> Token,
         subdivider: Option<Box<LexMatcher>>,
         trim_post_subdivide: Option<Box<LexMatcher>>,
-        fallback_lexer: Option<fn(&str) -> String>,
+        fallback_lexer: Option<fn(&str) -> Option<&str>>,
+        precheck: fn(&str) -> bool,
     ) -> Self {
         let pattern = format!(r"(?s)\A(?:{})", template);
-        // let pattern = format!(r"(?s){}", template);
+        let mode = match RegexBuilder::new(&pattern).build() {
+            Ok(regex) => LexerMode::Regex(regex, precheck),
+            Err(_) => {
+                if let Some(fallback) = fallback_lexer {
+                    LexerMode::Function(fallback)
+                } else {
+                    panic!("Unable to compile regex and no fallback function provided")
+                }
+            }
+        };
+
         Self {
             name: name.to_string(),
-            mode: LexerMode::Regex(
-                RegexBuilder::new(&pattern)
-                    .build()
-                    .map(LexerMode::Regex)
-                    .map_err(fallback_lexer.expect("No fallback matcher").map(LexerMode::Function))
-                    .expect("Failed to compile regex"),
-            ),
+            mode,
             token_class_func,
             subdivider,
             trim_post_subdivide,
@@ -102,18 +106,16 @@ impl LexMatcher {
         Self {
             name: name.to_string(),
             mode: RegexBuilder::new(&pattern)
-                    .build()
-                    .map(LexerMode::Regex)
-                    .map_err(LexerMode::Function)
-                    .expect("Failed to compile regex"),
+                .build()
+                .map(|re| LexerMode::Regex(re, |_| true))
+                .expect("Failed to compile regex"),
             token_class_func,
             subdivider,
             trim_post_subdivide,
         }
     }
 
-    pub fn scan_match<'a>(&'a self, input: &'a str) -> Option<Vec<LexedElement<'a>>> {
-        // let start = Instant::now();
+    pub fn scan_match<'a>(&'a self, input: &'a str) -> Option<(Vec<LexedElement<'a>>, usize)> {
         if input.is_empty() {
             panic!("Unexpected empty string!");
         }
@@ -123,17 +125,24 @@ impl LexMatcher {
             LexerMode::String(template) => input
                 .starts_with(template)
                 .then(|| LexedElement::new(template, self)),
-            LexerMode::Regex(regex) => regex
-                .find(input)
-                .ok()
-                .flatten()
-                .map(|mat| LexedElement::new(mat.as_str(), self)),
+            LexerMode::Regex(regex, is_match_valid) => {
+                if !(is_match_valid)(input) {
+                    return None;
+                }
+                regex
+                    .find(input)
+                    .ok()
+                    .flatten()
+                    .map(|mat| LexedElement::new(mat.as_str(), self))
+            }
+            LexerMode::Function(function) => (function)(input).map(|s| LexedElement::new(s, self)),
         };
 
         // Handle subdivision and trimming
         if let Some(matched) = matched {
+            let len = matched.raw.len();
             let elements = self.subdivide(matched);
-            Some(elements)
+            Some((elements, len))
         } else {
             None
         }
@@ -145,11 +154,12 @@ impl LexMatcher {
                 let end = start + template.len();
                 (start, end)
             }),
-            LexerMode::Regex(regex) => regex
+            LexerMode::Regex(regex, _) => regex
                 .find(input)
                 .ok()
                 .flatten()
                 .map(|mat| (mat.start(), mat.end())),
+            _ => todo!(),
         }
     }
 
@@ -271,10 +281,10 @@ impl LexMatcher {
     }
 }
 
-fn extract_nested_block_comment(input: &str) -> Option<String> {
+pub fn extract_nested_block_comment(input: &str) -> Option<&str> {
     let mut chars = input.chars().peekable();
     let mut comment = String::new();
-    
+
     // Ensure the input starts with "/*"
     if chars.next() != Some('/') || chars.next() != Some('*') {
         return None;
@@ -296,7 +306,7 @@ fn extract_nested_block_comment(input: &str) -> Option<String> {
             depth -= 1;
 
             if depth == 0 {
-                return Some(comment);
+                return Some(&input[..comment.len()]);
             }
         }
     }

@@ -50,8 +50,9 @@ pub fn get_lexers(dialect: Dialect) -> &'static Vec<LexMatcher> {{
 
 def generate_lexers():
     print("use once_cell::sync::Lazy;")
-    print("use crate::matcher::LexMatcher;")
+    print("use crate::matcher::{LexMatcher, extract_nested_block_comment};")
     print("use std::str::FromStr;")
+    print()
     for dialect in dialect_readout():
         loaded_dialect = dialect_selector(dialect.label)
         print(
@@ -63,28 +64,47 @@ def generate_lexers():
         print("]});")
 
 
-def _as_rust_lexer_matcher(lexer_matcher: LexerType):
+def _as_rust_lexer_matcher(lexer_matcher: LexerType, is_subdivide=False):
     lexer_class = lexer_matcher.__class__.__name__
     segment_name = segment_to_token_name(lexer_matcher.segment_class.__name__)
     subdivider = (
-        f"Some(Box::new({_as_rust_lexer_matcher(lexer_matcher.subdivider)}))"
+        f"Some(Box::new({_as_rust_lexer_matcher(lexer_matcher.subdivider, True)}))"
         if lexer_matcher.subdivider
         else None
     )
     trim_post_subdivide = (
-        f"Some(Box::new({_as_rust_lexer_matcher(lexer_matcher.trim_post_subdivide)}))"
+        f"Some(Box::new({_as_rust_lexer_matcher(lexer_matcher.trim_post_subdivide, True)}))"
         if lexer_matcher.trim_post_subdivide
         else None
     )
 
+    fallback_function = {
+        "block_comment": "Some(extract_nested_block_comment)",
+    }
+
+    is_match_valid_dict = {
+        "block_comment": '|input| input.starts_with("/")',
+        "dollar_quote": '|input| input.starts_with("$")',
+        "numeric_literal": "|input| input.starts_with(['.','0','1','2','3','4','5','6','7','8','9'])",
+        "inline_comment": "|input| input.starts_with(['#','-'])",
+        "escaped_single_quote": "|input| input.starts_with(['E'])",
+        "meta_command": r"|input| input.starts_with(['\\'])",
+        "meta_command_query_buffer": r"|input| input.starts_with(['\\'])",
+    }
+
     if lexer_class == "StringLexer":
         rust_fn = "string_lexer"
         template = f'"{lexer_matcher.template}"'
+        fallback = ""
+        is_match_valid = ""
     elif lexer_class == "RegexLexer":
         rust_fn = "regex_lexer"
         template = f'r#"{lexer_matcher.template}"#'
+        fallback = f"{fallback_function.get(lexer_matcher.name, None)},"
+        is_match_valid = f"{is_match_valid_dict.get(lexer_matcher.name, '|_| true')},"
     else:
         raise ValueError
+
     return f"""
     LexMatcher::{rust_fn}(
         "{lexer_matcher.name}",
@@ -92,6 +112,8 @@ def _as_rust_lexer_matcher(lexer_matcher: LexerType):
         Token::{segment_name},
         {subdivider},
         {trim_post_subdivide},
+        {fallback}
+        {is_match_valid}
     )"""
 
 
