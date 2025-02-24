@@ -1,11 +1,11 @@
-use std::{fmt::Display, ops::Range, sync::Arc};
+use std::{fmt::Display, sync::Arc};
 
 use crate::{marker::PositionMarker, slice::Slice, templater::TemplatedFile};
 use pyo3::{pyclass, pymethods};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
-struct MatchGrammar;
+pub struct MatchGrammar;
 
 #[pyclass]
 #[derive(Debug, Clone)]
@@ -237,7 +237,7 @@ impl Display for Token {
             "<{}: ({}) '{}'>",
             self.token_type.clone().unwrap_or("unknown".to_string()),
             self.pos_marker,
-            self.raw.escape_debug()
+            self.raw.escape_debug(),
         )
     }
 }
