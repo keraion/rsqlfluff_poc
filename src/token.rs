@@ -15,6 +15,7 @@ pub struct Token {
     pub is_meta: bool,
     pub allow_empty: bool,
     pub pos_marker: PositionMarker,
+    #[pyo3(get)]
     pub raw: String,
     is_whitespace: bool,
     is_code: bool,

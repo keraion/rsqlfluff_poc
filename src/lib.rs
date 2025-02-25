@@ -30,6 +30,7 @@ fn py_lex(
 /// A Python module implemented in Rust.
 #[pymodule]
 fn rsqlfluff(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<Token>()?;
     m.add_function(wrap_pyfunction!(py_lex, m)?)?;
     Ok(())
 }
