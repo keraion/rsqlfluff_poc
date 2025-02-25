@@ -25,7 +25,7 @@ def generate_dialect_enum():
         ]
     )
     print(f"""
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub enum Dialect {{
     {dialects}
 }}
@@ -50,7 +50,9 @@ pub fn get_lexers(dialect: Dialect) -> &'static Vec<LexMatcher> {{
 
 def generate_lexers():
     print("use once_cell::sync::Lazy;")
-    print("use crate::matcher::{LexMatcher, extract_nested_block_comment};")
+    print(
+        "use crate::matcher::{LexMatcher, extract_nested_block_comment, contains_sql_filename};"
+    )
     print("use std::str::FromStr;")
     print("use crate::token::Token;")
     print()
@@ -61,20 +63,20 @@ def generate_lexers():
             " vec!["
         )
         for matcher in loaded_dialect.get_lexer_matchers():
-            print(f"{_as_rust_lexer_matcher(matcher)},")
+            print(f"{_as_rust_lexer_matcher(matcher, dialect.label.capitalize())},")
         print("]});")
 
 
-def _as_rust_lexer_matcher(lexer_matcher: LexerType, is_subdivide=False):
+def _as_rust_lexer_matcher(lexer_matcher: LexerType, dialect: str, is_subdivide=False):
     lexer_class = lexer_matcher.__class__.__name__
     segment_name = segment_to_token_name(lexer_matcher.segment_class.__name__)
     subdivider = (
-        f"Some(Box::new({_as_rust_lexer_matcher(lexer_matcher.subdivider, True)}))"
+        f"Some(Box::new({_as_rust_lexer_matcher(lexer_matcher.subdivider, dialect, True)}))"
         if lexer_matcher.subdivider
         else None
     )
     trim_post_subdivide = (
-        f"Some(Box::new({_as_rust_lexer_matcher(lexer_matcher.trim_post_subdivide, True)}))"
+        f"Some(Box::new({_as_rust_lexer_matcher(lexer_matcher.trim_post_subdivide, dialect, True)}))"
         if lexer_matcher.trim_post_subdivide
         else None
     )
@@ -86,11 +88,28 @@ def _as_rust_lexer_matcher(lexer_matcher: LexerType, is_subdivide=False):
     is_match_valid_dict = {
         "block_comment": '|input| input.starts_with("/")',
         "dollar_quote": '|input| input.starts_with("$")',
+        "single_quote": r"""|input| match input.as_bytes() {
+        [b'\'', ..] => true,                     // Single quote case
+        [b'R' | b'r', b'\'', ..] => true,        // r' or R'
+        [b'B' | b'b', b'\'', ..] => true,        // b' or B'
+        [b'R' | b'r', b'B' | b'b', b'\'', ..] => true, // rb', RB', etc.
+        [b'B' | b'b', b'R' | b'r', b'\'', ..] => true, // br', Br', etc.
+        _ => false,
+    }""",
+        "double_quote": r"""|input| match input.as_bytes() {
+        [b'"', ..] => true,                     // Just a double quote
+        [b'R' | b'r', b'"', ..] => true,        // r" or R"
+        [b'B' | b'b', b'"', ..] => true,        // b" or B"
+        [b'R' | b'r', b'B' | b'b', b'"', ..] => true, // rb", RB", etc.
+        [b'B' | b'b', b'R' | b'r', b'"', ..] => true, // br", Br", etc.
+        _ => false,
+    }""",
         "numeric_literal": "|input| input.starts_with(['.','0','1','2','3','4','5','6','7','8','9'])",
-        "inline_comment": "|input| input.starts_with(['#','-'])",
-        "escaped_single_quote": "|input| input.starts_with(['E'])",
+        "inline_comment": "|input| input.starts_with(['#','-','/'])",
+        "escaped_single_quote": "|input| input.starts_with(['E', 'e'])",
         "meta_command": r"|input| input.starts_with(['\\'])",
         "meta_command_query_buffer": r"|input| input.starts_with(['\\'])",
+        "prompt_command": """|input| input.starts_with("PROMPT")""",
     }
 
     if lexer_class == "StringLexer":
@@ -99,8 +118,10 @@ def _as_rust_lexer_matcher(lexer_matcher: LexerType, is_subdivide=False):
         fallback = ""
         is_match_valid = ""
     elif lexer_class == "RegexLexer":
-        rust_fn = "regex_lexer"
+        rust_fn = "regex_subdivider" if is_subdivide else "regex_lexer"
         template = f'r#"{lexer_matcher.template}"#'
+        if template == r'r#"\[{2}([^[\\]|\\.)*\]{2}"#':
+            template = r'r#"\[{2}([^\[\\]|\\.)*\]{2}"#'
         fallback = f"{fallback_function.get(lexer_matcher.name, None)},"
         is_match_valid = f"{is_match_valid_dict.get(lexer_matcher.name, '|_| true')},"
     else:
@@ -108,6 +129,7 @@ def _as_rust_lexer_matcher(lexer_matcher: LexerType, is_subdivide=False):
 
     return f"""
     LexMatcher::{rust_fn}(
+        Dialect::{dialect},
         "{lexer_matcher.name}",
         {template},
         Token::{segment_name},
@@ -116,6 +138,7 @@ def _as_rust_lexer_matcher(lexer_matcher: LexerType, is_subdivide=False):
         {fallback}
         {is_match_valid}
     )"""
+
 
 print("/* This is a generated file! */")
 generate_lexers()

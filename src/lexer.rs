@@ -538,6 +538,7 @@ pub fn lex(
 
     let matcher = get_lexers(dialect);
     let last_resort_lexer = LexMatcher::regex_lexer(
+        Dialect::Ansi,
         "<unlexable>",
         r#"[^\t\n\ ]*"#,
         Token::unlexable_token,
@@ -676,13 +677,14 @@ mod tests {
 
         let matcher = get_lexers(Dialect::Ansi);
         let last_resort_lexer = LexMatcher::regex_lexer(
+            Dialect::Ansi,
             "<unlexable>",
             r#"[^\t\n\ ]*"#,
             Token::unlexable_token,
             None,
             None,
             None,
-            (|_| true),
+            |_| true,
         );
         let test_case = lex_string(
             r#"SELECT 1 
@@ -714,8 +716,9 @@ mod tests {
     #[test]
     fn test_scan_broken_quotes() {
         env_logger::init();
-        let matcher = get_lexers(Dialect::Ansi);;
+        let matcher = get_lexers(Dialect::Ansi);
         let last_resort_lexer = LexMatcher::regex_lexer(
+            Dialect::Ansi,
             "<unlexable>",
             r"[^\t\n\ ]*",
             Token::unlexable_token,
@@ -1014,6 +1017,7 @@ SELECT * FROM "_1234логистика"."_1234εμπορικός";
 
         let matcher = get_lexers(Dialect::Ansi);
         let last_resort_lexer = LexMatcher::regex_lexer(
+            Dialect::Ansi,
             "<unlexable>",
             r#"[^\t\n\ ]*"#,
             Token::unlexable_token,

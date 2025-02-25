@@ -1,20 +1,23 @@
-use std::fmt::Display;
+use std::{any::Any, fmt::Display, time::Instant};
 
-use fancy_regex::{Regex, RegexBuilder};
+use fancy_regex::{Regex as FancyRegex, RegexBuilder as FancyRegexBuilder};
+use regex::{Regex, RegexBuilder};
 
-use crate::{marker::PositionMarker, token::Token};
+use crate::{dialect::matcher::Dialect, marker::PositionMarker, token::Token};
 
 #[derive(Debug, Clone)]
 pub enum LexerMode {
-    String(String),                 // Match a literal string
-    Regex(Regex, fn(&str) -> bool), // Match using a regex
-    Function(fn(&str) -> Option<&str>),
+    String(String),                           // Match a literal string
+    Regex(Regex, fn(&str) -> bool),           // Match using a regex
+    FancyRegex(FancyRegex, fn(&str) -> bool), // Match using a regex
+    Function(fn(&str, Dialect) -> Option<&str>),
 }
 
 impl Display for LexerMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
             LexerMode::Regex(_, _) => write!(f, "RegexMatcher"),
+            LexerMode::FancyRegex(_, _) => write!(f, "FancyRegexMatcher"),
             LexerMode::String(_) => write!(f, "StringMatcher"),
             LexerMode::Function(_) => write!(f, "FunctionMatcher"),
         }
@@ -34,6 +37,7 @@ impl<'a> LexedElement<'a> {
 
 #[derive(Debug, Clone)]
 pub struct LexMatcher {
+    pub dialect: Dialect,
     pub name: String,
     pub mode: LexerMode,
     pub token_class_func: fn(String, PositionMarker) -> Token,
@@ -49,6 +53,7 @@ impl Display for LexMatcher {
 
 impl LexMatcher {
     pub fn string_lexer(
+        dialect: Dialect,
         name: &str,
         template: &str,
         token_class_func: fn(String, PositionMarker) -> Token,
@@ -56,6 +61,7 @@ impl LexMatcher {
         trim_post_subdivide: Option<Box<LexMatcher>>,
     ) -> Self {
         Self {
+            dialect,
             name: name.to_string(),
             mode: LexerMode::String(template.to_string()),
             token_class_func,
@@ -64,28 +70,32 @@ impl LexMatcher {
         }
     }
 
-    pub fn regex_lexer(
+    fn base_regex_lexer(
+        dialect: Dialect,
         name: &str,
-        template: &str,
+        pattern: &str,
         token_class_func: fn(String, PositionMarker) -> Token,
         subdivider: Option<Box<LexMatcher>>,
         trim_post_subdivide: Option<Box<LexMatcher>>,
-        fallback_lexer: Option<fn(&str) -> Option<&str>>,
+        fallback_lexer: Option<fn(&str, Dialect) -> Option<&str>>,
         precheck: fn(&str) -> bool,
     ) -> Self {
-        let pattern = format!(r"(?s)\A(?:{})", template);
         let mode = match RegexBuilder::new(&pattern).build() {
             Ok(regex) => LexerMode::Regex(regex, precheck),
-            Err(_) => {
-                if let Some(fallback) = fallback_lexer {
-                    LexerMode::Function(fallback)
-                } else {
-                    panic!("Unable to compile regex and no fallback function provided")
+            Err(_) => match FancyRegexBuilder::new(&pattern).build() {
+                Ok(regex) => LexerMode::FancyRegex(regex, precheck),
+                Err(_) => {
+                    if let Some(fallback) = fallback_lexer {
+                        LexerMode::Function(fallback)
+                    } else {
+                        panic!("Unable to compile regex {} and no fallback function provided", pattern)
+                    }
                 }
-            }
+            },
         };
 
         Self {
+            dialect,
             name: name.to_string(),
             mode,
             token_class_func,
@@ -94,28 +104,54 @@ impl LexMatcher {
         }
     }
 
-    pub fn regex_subdivider(
+    pub fn regex_lexer(
+        dialect: Dialect,
         name: &str,
         template: &str,
         token_class_func: fn(String, PositionMarker) -> Token,
         subdivider: Option<Box<LexMatcher>>,
         trim_post_subdivide: Option<Box<LexMatcher>>,
+        fallback_lexer: Option<fn(&str, Dialect) -> Option<&str>>,
+        precheck: fn(&str) -> bool,
     ) -> Self {
-        let pattern = format!(r"(?:{})", template);
-        // let pattern = format!(r"(?s){}", template);
-        Self {
-            name: name.to_string(),
-            mode: RegexBuilder::new(&pattern)
-                .build()
-                .map(|re| LexerMode::Regex(re, |_| true))
-                .expect("Failed to compile regex"),
+        let pattern = format!(r"(?s)\A(?:{})", template);
+        Self::base_regex_lexer(
+            dialect,
+            name,
+            &pattern,
             token_class_func,
             subdivider,
             trim_post_subdivide,
-        }
+            fallback_lexer,
+            precheck,
+        )
+    }
+
+    pub fn regex_subdivider(
+        dialect: Dialect,
+        name: &str,
+        template: &str,
+        token_class_func: fn(String, PositionMarker) -> Token,
+        subdivider: Option<Box<LexMatcher>>,
+        trim_post_subdivide: Option<Box<LexMatcher>>,
+        fallback_lexer: Option<fn(&str, Dialect) -> Option<&str>>,
+        precheck: fn(&str) -> bool,
+    ) -> Self {
+        let pattern = format!(r"(?:{})", template);
+        Self::base_regex_lexer(
+            dialect,
+            name,
+            &pattern,
+            token_class_func,
+            subdivider,
+            trim_post_subdivide,
+            fallback_lexer,
+            precheck,
+        )
     }
 
     pub fn scan_match<'a>(&'a self, input: &'a str) -> Option<(Vec<LexedElement<'a>>, usize)> {
+        // let t = Instant::now();
         if input.is_empty() {
             panic!("Unexpected empty string!");
         }
@@ -127,6 +163,16 @@ impl LexMatcher {
                 .then(|| LexedElement::new(template, self)),
             LexerMode::Regex(regex, is_match_valid) => {
                 if !(is_match_valid)(input) {
+                    // println!("{},{}", self.name, t.elapsed().as_nanos());
+                    return None;
+                }
+                regex
+                    .find(input)
+                    .map(|mat| LexedElement::new(mat.as_str(), self))
+            }
+            LexerMode::FancyRegex(regex, is_match_valid) => {
+                if !(is_match_valid)(input) {
+                    // println!("{},{}", self.name, t.elapsed().as_nanos());
                     return None;
                 }
                 regex
@@ -135,8 +181,11 @@ impl LexMatcher {
                     .flatten()
                     .map(|mat| LexedElement::new(mat.as_str(), self))
             }
-            LexerMode::Function(function) => (function)(input).map(|s| LexedElement::new(s, self)),
+            LexerMode::Function(function) => {
+                (function)(input, self.dialect).map(|s| LexedElement::new(s, self))
+            }
         };
+        // println!("{},{}", self.name, t.elapsed().as_nanos());
 
         // Handle subdivision and trimming
         if let Some(matched) = matched {
@@ -154,7 +203,8 @@ impl LexMatcher {
                 let end = start + template.len();
                 (start, end)
             }),
-            LexerMode::Regex(regex, _) => regex
+            LexerMode::Regex(regex, _) => regex.find(input).map(|mat| (mat.start(), mat.end())),
+            LexerMode::FancyRegex(regex, _) => regex
                 .find(input)
                 .ok()
                 .flatten()
@@ -189,10 +239,11 @@ impl LexMatcher {
     }
 
     fn trim_match<'a>(&'a self, raw: &'a str) -> Vec<LexedElement<'a>> {
+        let mut elements = Vec::new();
+        let mut buffer = raw;
+        let mut content_buffer = 0..0;
+
         if let Some(trim_post_subdivide) = &self.trim_post_subdivide {
-            let mut elements = Vec::new();
-            let mut buffer = raw;
-            let mut content_buffer = 0..0;
             while !buffer.is_empty() {
                 if let Some((start, end)) = trim_post_subdivide.search(buffer) {
                     if start == 0 {
@@ -202,7 +253,7 @@ impl LexMatcher {
                             matcher: trim_post_subdivide,
                         });
                         buffer = &buffer[end..];
-                        content_buffer.start = end;
+                        content_buffer = end..end;
                     } else if end == buffer.len() {
                         elements.push(LexedElement {
                             raw: &raw[content_buffer.start..content_buffer.end + start],
@@ -221,19 +272,11 @@ impl LexMatcher {
                     break;
                 }
             }
-            if !content_buffer.is_empty() || !buffer.is_empty() {
-                elements.push(LexedElement {
-                    raw: &raw[content_buffer.start..],
-                    matcher: self,
-                });
-            }
-            elements
-        } else {
-            vec![LexedElement {
-                raw: raw,
-                matcher: self,
-            }]
         }
+        if !content_buffer.is_empty() || !buffer.is_empty() {
+            elements.push(LexedElement::new(&raw[content_buffer.start..], self));
+        }
+        elements
     }
 
     /*
@@ -281,7 +324,7 @@ impl LexMatcher {
     }
 }
 
-pub fn extract_nested_block_comment(input: &str) -> Option<&str> {
+pub fn extract_nested_block_comment(input: &str, dialect: Dialect) -> Option<&str> {
     let mut chars = input.chars().peekable();
     let mut comment = String::new();
 
@@ -312,5 +355,54 @@ pub fn extract_nested_block_comment(input: &str) -> Option<&str> {
     }
 
     // If we reach here, the comment wasn't properly closed
-    None
+    match &dialect {
+        Dialect::Sqlite => Some(&input[..comment.len()]),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{dialect::matcher::Dialect, token::Token};
+
+    use super::{extract_nested_block_comment, LexMatcher};
+
+    #[test]
+    fn test_subdivide() {
+        let block_comment_matcher = LexMatcher::regex_lexer(
+            Dialect::Ansi,
+            "block_comment",
+            r#"\/\*([^\*]|\*(?!\/))*\*\/"#,
+            Token::comment_token,
+            Some(Box::new(LexMatcher::regex_subdivider(
+                Dialect::Ansi,
+                "newline",
+                r#"\r\n|\n"#,
+                Token::newline_token,
+                None,
+                None,
+                None,
+                |_| true,
+            ))),
+            Some(Box::new(LexMatcher::regex_subdivider(
+                Dialect::Ansi,
+                "whitespace",
+                r#"[^\S\r\n]+"#,
+                Token::whitespace_token,
+                None,
+                None,
+                None,
+                |_| true,
+            ))),
+            Some(extract_nested_block_comment),
+            |input| input.starts_with("/"),
+        );
+
+        let (elems, _) = block_comment_matcher
+            .scan_match("/*\n)\n*/")
+            .expect("should match");
+        for elem in elems {
+            println!("{}: {}", elem.matcher.name, elem.raw);
+        }
+    }
 }
