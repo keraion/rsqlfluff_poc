@@ -1,6 +1,6 @@
 /* This is a generated file! */
 use once_cell::sync::Lazy;
-use crate::matcher::{LexMatcher, extract_nested_block_comment, contains_sql_filename};
+use crate::matcher::{LexMatcher, extract_nested_block_comment};
 use std::str::FromStr;
 use crate::token::Token;
 

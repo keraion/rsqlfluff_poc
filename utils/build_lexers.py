@@ -51,7 +51,7 @@ pub fn get_lexers(dialect: Dialect) -> &'static Vec<LexMatcher> {{
 def generate_lexers():
     print("use once_cell::sync::Lazy;")
     print(
-        "use crate::matcher::{LexMatcher, extract_nested_block_comment, contains_sql_filename};"
+        "use crate::matcher::{LexMatcher, extract_nested_block_comment};"
     )
     print("use std::str::FromStr;")
     print("use crate::token::Token;")
