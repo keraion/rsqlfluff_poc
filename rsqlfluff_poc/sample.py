@@ -28,3 +28,27 @@ for dialect in dialect_readout():
     print(rs_end - rs_start)
     print(((py_end - py_start) - (rs_end - rs_start)) / (py_end - py_start))
     print(f"{dialect.label} Speedup: {(py_end - py_start) / (rs_end - rs_start)}")
+
+for dialect in dialect_readout():
+    for f in glob.glob(f"../sqlfluff/test/fixtures/dialects/{dialect.label}/*.sql"):
+        if "obevo" in f:
+            continue
+        with open(f, "r", encoding="utf8") as fh:
+            sql = fh.read()
+
+        lexer = Lexer(dialect=dialect.label)
+        py_start = time.time()
+        py_out = lexer.lex(sql)
+        py_end = time.time()
+
+        rs_start = time.time()
+        rs_out = rsqlfluff.lex(sql, True, dialect.label)
+        rs_end = time.time()
+        for p, r in zip(py_out[0], rs_out[0]):
+            assert p.raw == r.raw
+        if ((py_end - py_start) / (rs_end - rs_start)) < 1.0:
+            print(f"{dialect.label}: {f}")
+            print(py_end - py_start)
+            print(rs_end - rs_start)
+            print(((py_end - py_start) - (rs_end - rs_start)) / (py_end - py_start))
+            print(f"{dialect.label} Speedup: {(py_end - py_start) / (rs_end - rs_start)}")
