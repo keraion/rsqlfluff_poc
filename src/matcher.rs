@@ -1,4 +1,4 @@
-use std::{any::Any, fmt::Display, time::Instant};
+use std::{fmt::Display, time::Instant};
 
 use fancy_regex::{Regex as FancyRegex, RegexBuilder as FancyRegexBuilder};
 use regex::{Regex, RegexBuilder};

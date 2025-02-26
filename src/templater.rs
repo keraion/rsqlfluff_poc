@@ -3,28 +3,22 @@ use std::{
     collections::HashMap,
 };
 
-use pyo3::{pyclass, pymethods};
+use pyo3::{pyclass, pymethods, FromPyObject, IntoPyObject};
 
 use crate::slice::Slice;
 
-#[pyclass(frozen)]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq, Clone, FromPyObject, IntoPyObject)]
 pub struct RawFileSlice {
-    #[pyo3(get)]
     pub raw: String, // Source string
-    #[pyo3(get)]
     pub slice_type: String,
-    #[pyo3(get)]
     pub source_idx: usize, // Offset from beginning of source string
     // Block index, incremented on start or end block tags, e.g. "if", "for".
     // This is used in `BaseRule.discard_unsafe_fixes()` to reject any fixes
     // which span multiple templated blocks.
-    #[pyo3(get)]
     pub block_idx: usize,
     // The command of a templated tag, e.g. "if", "for"
     // This is used in template tracing as a kind of cache to identify the kind
     // of template element this is without having to re-extract it each time.
-    #[pyo3(get)]
     pub tag: Option<String>,
 }
 
@@ -61,14 +55,10 @@ impl RawFileSlice {
     }
 }
 
-#[pyclass(frozen)]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq, Clone, FromPyObject, IntoPyObject)]
 pub struct TemplatedFileSlice {
-    #[pyo3(get)]
     pub slice_type: String,
-    #[pyo3(get)]
     pub source_slice: Slice,
-    #[pyo3(get)]
     pub templated_slice: Slice,
 }
 
@@ -83,20 +73,28 @@ impl TemplatedFileSlice {
 }
 
 #[pyclass]
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, FromPyObject)]
 pub struct TemplatedFile {
+    #[pyo3(get)]
     pub source_str: String,
+    #[pyo3(get)]
     pub fname: String,
+    #[pyo3(get)]
     pub templated_str: String,
+    #[pyo3(get)]
     pub sliced_file: Vec<TemplatedFileSlice>,
+    #[pyo3(get)]
     pub raw_sliced: Vec<RawFileSlice>,
-    source_newlines: Vec<usize>,
-    templated_newlines: Vec<usize>,
+    #[pyo3(get)]
+    _source_newlines: Vec<usize>,
+    #[pyo3(get)]
+    _templated_newlines: Vec<usize>,
 }
 
 #[pymethods]
 impl TemplatedFile {
     #[new]
+    #[pyo3(signature = (source_str, fname, templated_str=None, sliced_file=None, raw_sliced=None))]
     pub fn new(
         source_str: String,
         fname: String,
@@ -115,7 +113,7 @@ impl TemplatedFile {
                 }
             } else {
                 // If sliced_file is None, ensure the file is not templated.
-                if templated_str_in != source_str {
+                if templated_str_in != source_str.clone() {
                     panic!("Cannot instantiate a templated file without slices!");
                 }
                 // Create "literal" slices for both sliced_file and raw_sliced.
@@ -135,8 +133,8 @@ impl TemplatedFile {
                 )
             };
 
-        let source_newlines = iter_indices_of_newlines(source_str.as_str()).collect();
-        let templated_newlines = iter_indices_of_newlines(templated_str_in.as_str()).collect();
+        let _source_newlines = iter_indices_of_newlines(&source_str).collect();
+        let _templated_newlines = iter_indices_of_newlines(&templated_str_in).collect();
 
         // Consistency check raw string and slices.
         let mut pos = 0;
@@ -160,15 +158,15 @@ impl TemplatedFile {
         let mut previous_slice: Option<&TemplatedFileSlice> = None;
         for tfs in sliced_file.iter() {
             if let Some(prev_slice) = previous_slice {
-                if tfs.templated_slice.start != prev_slice.templated_slice.end {
+                if tfs.templated_slice.start != prev_slice.templated_slice.stop {
                     panic!(
                         "Templated slices found to be non-contiguous. \
                         {:?} (starting {}) does not follow {:?} (starting {})",
                         tfs.templated_slice,
-                        &templated_str_in[tfs.templated_slice.start..tfs.templated_slice.end],
+                        &templated_str_in[tfs.templated_slice.start..tfs.templated_slice.stop],
                         prev_slice.templated_slice,
                         &templated_str_in
-                            [prev_slice.templated_slice.start..prev_slice.templated_slice.end],
+                            [prev_slice.templated_slice.start..prev_slice.templated_slice.stop],
                     );
                 }
             } else if tfs.templated_slice.start != 0 {
@@ -182,11 +180,11 @@ impl TemplatedFile {
 
         if let Some(tfs) = sliced_file.last() {
             if let Some(templated) = templated_str.as_ref() {
-                if tfs.templated_slice.end != templated.len() {
+                if tfs.templated_slice.stop != templated.len() {
                     panic!(
                         "Length of templated file mismatch with final slice: {} != {}.",
                         templated.len(),
-                        tfs.templated_slice.end
+                        tfs.templated_slice.stop
                     );
                 }
             }
@@ -195,18 +193,13 @@ impl TemplatedFile {
         TemplatedFile {
             source_str,
             fname,
-            templated_str: templated_str_in,
+            templated_str: templated_str_in.to_string(),
             sliced_file,
             raw_sliced,
-            source_newlines,
-            templated_newlines,
+            _source_newlines,
+            _templated_newlines,
         }
     }
-
-    // #[classmethod]
-    // pub fn from_string(_cls: &Bound<'_, PyType>, raw: String) -> Self {
-    //     TemplatedFile::new(raw, String::from("<string>"), None, None, None)
-    // }
 
     pub fn raw_slices_spanning_source_slice(&self, source_slice: Slice) -> Vec<RawFileSlice> {
         // Special case: The source_slice is at the end of the file.
@@ -225,7 +218,7 @@ impl TemplatedFile {
         // Find slice index of the end of this patch.
         let mut slice_span = 1;
         while raw_slice_idx + slice_span < self.raw_sliced.len()
-            && self.raw_sliced[raw_slice_idx + slice_span].source_idx < source_slice.end
+            && self.raw_sliced[raw_slice_idx + slice_span].source_idx < source_slice.stop
         {
             slice_span += 1;
         }
@@ -252,7 +245,7 @@ impl TemplatedFile {
             self.get_insertion_point(ts_start_subsliced_file, template_slice.start);
 
         // Zero length slice
-        if template_slice.start == template_slice.end {
+        if template_slice.start == template_slice.stop {
             // Is it on a join?
             if let Some(insertion_point) = insertion_point {
                 return Slice::from(insertion_point..insertion_point);
@@ -276,7 +269,7 @@ impl TemplatedFile {
         // Use a non inclusive match to get the end point.
         // Find the indices of sliced files touching the template slice end position
         let (ts_stop_sf_start, ts_stop_sf_stop) =
-            self.find_slice_indices_of_templated_pos(template_slice.end, false, None);
+            self.find_slice_indices_of_templated_pos(template_slice.stop, false, None);
 
         // Update starting position based on insertion point
         let mut ts_start_sf_start = ts_start_sf_start;
@@ -328,10 +321,10 @@ impl TemplatedFile {
 
         // Stop.
         let source_stop = if stop_slices.last().unwrap().slice_type == "literal" {
-            let offset = stop_slices.last().unwrap().templated_slice.end - template_slice.end;
-            stop_slices.last().unwrap().source_slice.end - offset
+            let offset = stop_slices.last().unwrap().templated_slice.stop - template_slice.stop;
+            stop_slices.last().unwrap().source_slice.stop - offset
         } else {
-            stop_slices.last().unwrap().source_slice.end
+            stop_slices.last().unwrap().source_slice.stop
         };
 
         // Does this slice go backward?
@@ -349,7 +342,7 @@ impl TemplatedFile {
                     .unwrap(),
                 subslices
                     .iter()
-                    .map(|elem| elem.source_slice.end)
+                    .map(|elem| elem.source_slice.stop)
                     .max()
                     .unwrap(),
             )
@@ -370,9 +363,9 @@ impl From<String> for TemplatedFile {
 impl TemplatedFile {
     pub fn get_line_pos_of_char_pos(&self, char_pos: usize, source: bool) -> (usize, usize) {
         let ref_str = if source {
-            &self.source_newlines
+            &self._source_newlines
         } else {
-            &self.templated_newlines
+            &self._templated_newlines
         };
 
         let nl_idx = ref_str.binary_search(&char_pos).unwrap_or_else(|x| x);
@@ -404,7 +397,7 @@ impl TemplatedFile {
         // source.
         for (idx, elem) in self.sliced_file.iter().enumerate().skip(start_idx) {
             last_idx = idx + start_idx;
-            if elem.templated_slice.end >= templated_pos {
+            if elem.templated_slice.stop >= templated_pos {
                 if first_idx.is_none() {
                     first_idx = Some(idx + start_idx);
                 }
@@ -441,8 +434,8 @@ impl TemplatedFile {
                     insertion_point = point;
                 }
             }
-            if elem.templated_slice.end == template_slice_start {
-                point = Some(elem.source_slice.end);
+            if elem.templated_slice.stop == template_slice_start {
+                point = Some(elem.source_slice.stop);
                 if insertion_point.is_none() || point.unwrap() < insertion_point.unwrap() {
                     insertion_point = point;
                 }
@@ -458,7 +451,7 @@ impl TemplatedFile {
         }
 
         // Zero length slice. It's a literal, because it's definitely not templated.
-        if source_slice.start == source_slice.end {
+        if source_slice.start == source_slice.stop {
             return true;
         }
 
@@ -468,7 +461,7 @@ impl TemplatedFile {
             // otherwise set false.
             if raw_slice.source_idx <= source_slice.start {
                 is_literal = raw_slice.slice_type == "literal";
-            } else if raw_slice.source_idx >= source_slice.end {
+            } else if raw_slice.source_idx >= source_slice.stop {
                 // We've gone past the end. Break and Return.
                 break;
             } else {
@@ -492,14 +485,14 @@ impl TemplatedFile {
 
     pub fn source_position_dict_from_slice(&self, source_slice: &Slice) -> HashMap<String, usize> {
         let start = self.get_line_pos_of_char_pos(source_slice.start, true);
-        let stop = self.get_line_pos_of_char_pos(source_slice.end, true);
+        let stop = self.get_line_pos_of_char_pos(source_slice.stop, true);
         let mut dict = HashMap::new();
         dict.insert("start_line_no".to_string(), start.0);
         dict.insert("start_line_pos".to_string(), start.1);
         dict.insert("start_file_pos".to_string(), source_slice.start);
         dict.insert("end_line_no".to_string(), stop.0);
         dict.insert("end_line_pos".to_string(), stop.1);
-        dict.insert("end_file_pos".to_string(), source_slice.end);
+        dict.insert("end_file_pos".to_string(), source_slice.stop);
         dict
     }
 }

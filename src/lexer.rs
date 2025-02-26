@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use pyo3::{pyclass, pymethods};
+use pyo3::{pyclass, pymethods, FromPyObject};
 
 use crate::{
     get_lexers,
@@ -284,7 +284,7 @@ fn iter_tokens(
                     "literal" => {
                         let tfs_offset = tfs.source_slice.start - tfs.templated_slice.start;
 
-                        if element.template_slice.end <= tfs.templated_slice.end {
+                        if element.template_slice.stop <= tfs.templated_slice.stop {
                             // Consume the whole element within this slice
                             let slice_start = stashed_source_idx.unwrap_or_else(|| {
                                 element.template_slice.start + consumed_length + tfs_offset
@@ -293,7 +293,7 @@ fn iter_tokens(
                             segments.push(element.to_token(
                                 PositionMarker::new(
                                     Slice::from(
-                                        slice_start..(element.template_slice.end + tfs_offset),
+                                        slice_start..(element.template_slice.stop + tfs_offset),
                                     ),
                                     element.template_slice.clone(),
                                     templated_file,
@@ -304,21 +304,21 @@ fn iter_tokens(
                             ));
 
                             // Move to the next templated slice if it's an exact match
-                            if element.template_slice.end == tfs.templated_slice.end {
+                            if element.template_slice.stop == tfs.templated_slice.stop {
                                 tfs_idx += 1;
                             }
                             break;
                         } else {
                             // Handle spilling over slices
                             let incremental_length =
-                                tfs.templated_slice.end - element.template_slice.start;
+                                tfs.templated_slice.stop - element.template_slice.start;
                             segments.push(element.to_token(
                                 PositionMarker::new(
                                     Slice::from(
                                         (element.template_slice.start
                                             + consumed_length
                                             + tfs_offset)
-                                            ..tfs.templated_slice.end + tfs_offset,
+                                            ..tfs.templated_slice.stop + tfs_offset,
                                     ),
                                     element.template_slice.clone(),
                                     templated_file,
@@ -337,12 +337,12 @@ fn iter_tokens(
                                 block_stack.enter(tfs.source_slice.clone());
                             }
 
-                            if element.template_slice.end <= tfs.templated_slice.end {
+                            if element.template_slice.stop <= tfs.templated_slice.stop {
                                 let slice_start =
                                     stashed_source_idx.unwrap_or(tfs.source_slice.start);
                                 segments.push(element.to_token(
                                     PositionMarker::new(
-                                        Slice::from(slice_start..tfs.source_slice.end),
+                                        Slice::from(slice_start..tfs.source_slice.stop),
                                         element.template_slice.clone(),
                                         &templated_file,
                                         None,
@@ -351,7 +351,7 @@ fn iter_tokens(
                                     Some(consumed_length..),
                                 ));
 
-                                if element.template_slice.end == tfs.templated_slice.end {
+                                if element.template_slice.stop == tfs.templated_slice.stop {
                                     tfs_idx += 1;
                                 }
                                 break;
@@ -456,8 +456,8 @@ fn handle_zero_length_slice(
         } else if add_indents && (tfs.slice_type == "block_start" || tfs.slice_type == "block_mid")
         {
             let pos_marker = PositionMarker::from_point(
-                tfs.source_slice.end,
-                tfs.templated_slice.end,
+                tfs.source_slice.stop,
+                tfs.templated_slice.stop,
                 templated_file,
                 None,
                 None,
@@ -472,13 +472,13 @@ fn handle_zero_length_slice(
         // Before we move on, we might have a _forward_ jump to the next
         // element. That element can handle itself, but we'll add a
         // placeholder for it here before we move on.
-        if next_tfs.is_some() && next_tfs.unwrap().source_slice.start > tfs.source_slice.end {
+        if next_tfs.is_some() && next_tfs.unwrap().source_slice.start > tfs.source_slice.stop {
             let placeholder_str = templated_file.source_str
-                [tfs.source_slice.end..next_tfs.unwrap().source_slice.start]
+                [tfs.source_slice.stop..next_tfs.unwrap().source_slice.start]
                 .to_string();
             log::debug!("Forward jump detected. Inserting placeholder");
             let pos_marker = PositionMarker::new(
-                Slice::from(tfs.source_slice.end..next_tfs.unwrap().source_slice.start),
+                Slice::from(tfs.source_slice.stop..next_tfs.unwrap().source_slice.start),
                 tfs.templated_slice.clone(),
                 templated_file,
                 None,
@@ -510,13 +510,14 @@ fn handle_zero_length_slice(
 }
 
 pub fn is_zero_slice(s: &Slice) -> bool {
-    s.start == s.end
+    s.start == s.stop
 }
 
-#[pyclass]
-#[derive(Clone)]
+#[derive(FromPyObject)]
 pub enum LexInput {
+    #[pyo3(transparent, annotation = "str")]
     String(String),
+    #[pyo3(transparent, annotation = "TemplatedFile")]
     TemplatedFile(TemplatedFile),
 }
 

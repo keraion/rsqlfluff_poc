@@ -1,19 +1,18 @@
 use std::ops::Range;
 
-use pyo3::pyclass;
+use pyo3::{pyclass, FromPyObject, IntoPyObject};
 
-#[pyclass]
-#[derive(Debug, Clone, PartialEq, Hash, Eq)]
+#[derive(Debug, PartialEq, Hash, Eq, Clone, FromPyObject, IntoPyObject)]
 pub struct Slice {
     pub start: usize,
-    pub end: usize,
+    pub stop: usize,
 }
 
 impl From<Range<usize>> for Slice {
     fn from(value: Range<usize>) -> Self {
         Self {
             start: value.start,
-            end: value.end,
+            stop: value.end,
         }
     }
 }
@@ -24,10 +23,10 @@ impl Slice {
     }
 
     pub fn as_range(&self) -> Range<usize> {
-        self.start..self.end
+        self.start..self.stop
     }
 
     pub fn len(&self) -> usize {
-        self.end - self.start
+        self.stop - self.start
     }
 }

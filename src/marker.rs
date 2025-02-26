@@ -103,8 +103,8 @@ impl PositionMarker {
 
     pub fn end_point_marker(&self) -> Self {
         PositionMarker::from_point(
-            self.source_slice.end,
-            self.templated_slice.end,
+            self.source_slice.stop,
+            self.templated_slice.stop,
             &self.templated_file,
             None,
             None,
@@ -129,7 +129,7 @@ impl PositionMarker {
     }
 
     pub fn source_str(&self) -> String {
-        self.templated_file.source_str[self.source_slice.start..self.source_slice.end].to_owned()
+        self.templated_file.source_str[self.source_slice.start..self.source_slice.stop].to_owned()
     }
 
     pub fn to_source_dict(&self) -> HashMap<String, usize> {
@@ -185,7 +185,7 @@ impl PositionMarker {
                 .unwrap()
                 ..valid_markers
                     .iter()
-                    .map(|m| m.source_slice.end)
+                    .map(|m| m.source_slice.stop)
                     .max()
                     .unwrap(),
         );
@@ -198,7 +198,7 @@ impl PositionMarker {
                 .unwrap()
                 ..valid_markers
                     .iter()
-                    .map(|m| m.templated_slice.end)
+                    .map(|m| m.templated_slice.stop)
                     .max()
                     .unwrap(),
         );
@@ -242,5 +242,5 @@ impl Display for PositionMarker {
 }
 
 pub fn slice_is_point(test_slice: &Slice) -> bool {
-    test_slice.start == test_slice.end
+    test_slice.start == test_slice.stop
 }
