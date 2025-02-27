@@ -10,7 +10,7 @@ pub mod token;
 use dialect::matcher::*;
 use lexer::{LexInput, SQLLexError};
 use pyo3::prelude::*;
-use templater::{RawFileSlice, TemplatedFile, TemplatedFileSlice};
+use templater::PyTemplatedFile;
 use token::Token;
 
 use std::str::FromStr;
@@ -31,7 +31,7 @@ fn py_lex(
 #[pymodule]
 fn rsqlfluff(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Token>()?;
-    m.add_class::<TemplatedFile>()?;
+    m.add_class::<PyTemplatedFile>()?;
     m.add_function(wrap_pyfunction!(py_lex, m)?)?;
     Ok(())
 }

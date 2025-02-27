@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use pyo3::{pyclass, FromPyObject, IntoPyObject};
+use pyo3::{FromPyObject, IntoPyObject};
 
 #[derive(Debug, PartialEq, Hash, Eq, Clone, FromPyObject, IntoPyObject)]
 pub struct Slice {
