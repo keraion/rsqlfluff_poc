@@ -16,10 +16,6 @@ pub struct TemplatedFile {
     pub raw_sliced: Vec<RawFileSlice>,
     source_newlines: Vec<usize>,
     templated_newlines: Vec<usize>,
-    // py_sliced_file: Vec<RsTemplatedFileSlice>,
-    // py_raw_sliced: Vec<RawFileSlice>,
-    // py_source_newlines: Vec<usize>,
-    // py_templated_newlines: Vec<usize>,
 }
 
 impl TemplatedFile {
@@ -118,12 +114,6 @@ impl TemplatedFile {
             }
         }
 
-        // let py_sliced_file =
-        //     TemplatedFile::utf8_to_unicode_slices(&source_str, &templated_str_in, &sliced_file);
-        // let py_raw_sliced = TemplatedFile::raw_slices_to_py(&raw_sliced.clone());
-        // let py_source_newlines = iter_indices_of_unicode_newlines(&source_str).collect();
-        // let py_templated_newlines = iter_indices_of_unicode_newlines(&source_str).collect();
-
         TemplatedFile {
             source_str,
             fname,
@@ -132,10 +122,6 @@ impl TemplatedFile {
             raw_sliced,
             source_newlines,
             templated_newlines,
-            // py_sliced_file,
-            // py_raw_sliced,
-            // py_source_newlines,
-            // py_templated_newlines,
         }
     }
 
@@ -173,7 +159,7 @@ impl TemplatedFile {
 
         // Find the indices of sliced files touching the template slice start position
         let (ts_start_sf_start, ts_start_sf_stop) =
-            self.find_slice_indices_of_templated_pos(template_slice.start, true, None);
+            self.find_slice_indices_of_templated_pos(template_slice.start, None, true);
 
         // Get the sliced files within the found indices
         let ts_start_subsliced_file = &self.sliced_file[ts_start_sf_start..ts_start_sf_stop];
@@ -207,7 +193,7 @@ impl TemplatedFile {
         // Use a non inclusive match to get the end point.
         // Find the indices of sliced files touching the template slice end position
         let (ts_stop_sf_start, ts_stop_sf_stop) =
-            self.find_slice_indices_of_templated_pos(template_slice.stop, false, None);
+            self.find_slice_indices_of_templated_pos(template_slice.stop, None, false);
 
         // Update starting position based on insertion point
         let mut ts_start_sf_start = ts_start_sf_start;
@@ -321,8 +307,8 @@ impl TemplatedFile {
     fn find_slice_indices_of_templated_pos(
         &self,
         templated_pos: usize,
-        inclusive: bool,
         start_idx: Option<usize>,
+        inclusive: bool,
     ) -> (usize, usize) {
         let start_idx = start_idx.unwrap_or(0);
         let mut first_idx = None;
@@ -446,8 +432,6 @@ fn iter_indices_of_newlines(raw_str: &str) -> impl Iterator<Item = usize> + '_ {
 }
 
 pub mod python {
-    use std::ops::Deref;
-
     use pyo3::{prelude::*, types::PyType};
 
     use crate::templater::fileslice::python::sqlfluff::{
@@ -774,11 +758,9 @@ pub mod python {
     }
 }
 
-/*
 #[cfg(test)]
 mod tests {
     use super::*;
-    use once_cell::sync::Lazy;
 
     #[derive(Clone)]
     struct TestFileArgs {
@@ -789,24 +771,38 @@ mod tests {
         source_str: String,
     }
 
-    static ref SIMPLE_FILE_KWARGS: Lazy<TestFileArgs> = Lazy::new(|| {
+    fn simple_file_kwargs() -> TestFileArgs {
         TestFileArgs {
             fname: "test.sql".to_string(),
             source_str: "01234\n6789{{foo}}fo\nbarss".to_string(),
             templated_str: Some("01234\n6789x\nfo\nbarss".to_string()),
             sliced_file: vec![
-                TemplatedFileSlice::new("literal".to_string(), 0..10, 0..10),
-                TemplatedFileSlice::new("templated".to_string(), 10..17, 10..12),
-                TemplatedFileSlice::new("literal".to_string(), 17..25, 12..20),
+                TemplatedFileSlice::new(
+                    "literal".to_string(),
+                    Slice::from(0..10),
+                    Slice::from(0..10),
+                ),
+                TemplatedFileSlice::new(
+                    "templated".to_string(),
+                    Slice::from(10..17),
+                    Slice::from(10..12),
+                ),
+                TemplatedFileSlice::new(
+                    "literal".to_string(),
+                    Slice::from(17..25),
+                    Slice::from(12..20),
+                ),
             ],
             raw_sliced: vec![
                 RawFileSlice::new("x".repeat(10), "literal".to_string(), 0),
                 RawFileSlice::new("x".repeat(7), "templated".to_string(), 10),
-                RawFileSlice::new("x".repeat(8), "literal".to_string(), 17)
+                RawFileSlice::new("x".repeat(8), "literal".to_string(), 17),
             ],
         }
-    });
-        static ref COMPLEX_RAW_SLICED: Vec<RawFileSlice> = vec![
+    }
+
+    fn complex_raw_sliced() -> Vec<RawFileSlice> {
+        vec![
             RawFileSlice::new("x".repeat(13), "literal".to_string(), 0),
             RawFileSlice::new("x".repeat(16), "comment".to_string(), 13),
             RawFileSlice::new("x".repeat(15), "literal".to_string(), 29),
@@ -824,53 +820,178 @@ mod tests {
             RawFileSlice::new("x".repeat(9), "literal".to_string(), 194),
             RawFileSlice::new("x".repeat(12), "block_end".to_string(), 203),
             RawFileSlice::new("x".repeat(15), "literal".to_string(), 215),
-        ];
-        static ref COMPLEX_FILE_KWARGS: TestFileArgs = {
-            let raw_sliced = &*COMPLEX_RAW_SLICED;
+        ]
+    }
 
-            TestFileArgs {
-                fname: "test.sql".to_string(),
-                sliced_file: vec![
-                    TemplatedFileSlice::new("literal".to_string(), 0..13, 0..13),
-                    TemplatedFileSlice::new("comment".to_string(), 13..29, 13..13),
-                    TemplatedFileSlice::new("literal".to_string(), 29..44, 13..28),
-                    TemplatedFileSlice::new("block_start".to_string(), 44..68, 28..28),
-                    TemplatedFileSlice::new("literal".to_string(), 68..81, 28..41),
-                    TemplatedFileSlice::new("templated".to_string(), 81..86, 41..42),
-                    TemplatedFileSlice::new("literal".to_string(), 86..110, 42..66),
-                    TemplatedFileSlice::new("templated".to_string(), 68..86, 66..76),
-                    TemplatedFileSlice::new("literal".to_string(), 68..81, 76..89),
-                    TemplatedFileSlice::new("templated".to_string(), 81..86, 89..90),
-                    TemplatedFileSlice::new("literal".to_string(), 86..110, 90..114),
-                    TemplatedFileSlice::new("templated".to_string(), 68..86, 114..125),
-                    TemplatedFileSlice::new("literal".to_string(), 68..81, 125..138),
-                    TemplatedFileSlice::new("templated".to_string(), 81..86, 138..139),
-                    TemplatedFileSlice::new("literal".to_string(), 86..110, 139..163),
-                    TemplatedFileSlice::new("templated".to_string(), 110..123, 163..166),
-                    TemplatedFileSlice::new("literal".to_string(), 123..132, 166..175),
-                    TemplatedFileSlice::new("block_end".to_string(), 132..144, 175..175),
-                    TemplatedFileSlice::new("literal".to_string(), 144..155, 175..186),
-                    TemplatedFileSlice::new("block_start".to_string(), 155..179, 186..186),
-                    TemplatedFileSlice::new("literal".to_string(), 179..189, 186..196),
-                    TemplatedFileSlice::new("templated".to_string(), 189..194, 196..197),
-                    TemplatedFileSlice::new("literal".to_string(), 194..203, 197..206),
-                    TemplatedFileSlice::new("literal".to_string(), 179..189, 206..216),
-                    TemplatedFileSlice::new("templated".to_string(), 189..194, 216..217),
-                    TemplatedFileSlice::new("literal".to_string(), 194..203, 217..226),
-                    TemplatedFileSlice::new("literal".to_string(), 179..189, 226..236),
-                    TemplatedFileSlice::new("templated".to_string(), 189..194, 236..237),
-                    TemplatedFileSlice::new("literal".to_string(), 194..203, 237..246),
-                    TemplatedFileSlice::new("block_end".to_string(), 203..215, 246..246),
-                    TemplatedFileSlice::new("literal".to_string(), 215..230, 246..261),
-                ],
-                raw_sliced: raw_sliced.clone(),
-                source_str: raw_sliced
-                    .iter()
-                    .map(|slice| &*slice.raw)
-                    .collect::<String>(),
-                templated_str: None,
-            }
-        };
+    fn complex_file_kwargs() -> TestFileArgs {
+        let raw_sliced = complex_raw_sliced();
+
+        TestFileArgs {
+            fname: "test.sql".to_string(),
+            sliced_file: vec![
+                TemplatedFileSlice::new(
+                    "literal".to_string(),
+                    Slice::from(0..13),
+                    Slice::from(0..13),
+                ),
+                TemplatedFileSlice::new(
+                    "comment".to_string(),
+                    Slice::from(13..29),
+                    Slice::from(13..13),
+                ),
+                TemplatedFileSlice::new(
+                    "literal".to_string(),
+                    Slice::from(29..44),
+                    Slice::from(13..28),
+                ),
+                TemplatedFileSlice::new(
+                    "block_start".to_string(),
+                    Slice::from(44..68),
+                    Slice::from(28..28),
+                ),
+                TemplatedFileSlice::new(
+                    "literal".to_string(),
+                    Slice::from(68..81),
+                    Slice::from(28..41),
+                ),
+                TemplatedFileSlice::new(
+                    "templated".to_string(),
+                    Slice::from(81..86),
+                    Slice::from(41..42),
+                ),
+                TemplatedFileSlice::new(
+                    "literal".to_string(),
+                    Slice::from(86..110),
+                    Slice::from(42..66),
+                ),
+                TemplatedFileSlice::new(
+                    "templated".to_string(),
+                    Slice::from(68..86),
+                    Slice::from(66..76),
+                ),
+                TemplatedFileSlice::new(
+                    "literal".to_string(),
+                    Slice::from(68..81),
+                    Slice::from(76..89),
+                ),
+                TemplatedFileSlice::new(
+                    "templated".to_string(),
+                    Slice::from(81..86),
+                    Slice::from(89..90),
+                ),
+                TemplatedFileSlice::new(
+                    "literal".to_string(),
+                    Slice::from(86..110),
+                    Slice::from(90..114),
+                ),
+                TemplatedFileSlice::new(
+                    "templated".to_string(),
+                    Slice::from(68..86),
+                    Slice::from(114..125),
+                ),
+                TemplatedFileSlice::new(
+                    "literal".to_string(),
+                    Slice::from(68..81),
+                    Slice::from(125..138),
+                ),
+                TemplatedFileSlice::new(
+                    "templated".to_string(),
+                    Slice::from(81..86),
+                    Slice::from(138..139),
+                ),
+                TemplatedFileSlice::new(
+                    "literal".to_string(),
+                    Slice::from(86..110),
+                    Slice::from(139..163),
+                ),
+                TemplatedFileSlice::new(
+                    "templated".to_string(),
+                    Slice::from(110..123),
+                    Slice::from(163..166),
+                ),
+                TemplatedFileSlice::new(
+                    "literal".to_string(),
+                    Slice::from(123..132),
+                    Slice::from(166..175),
+                ),
+                TemplatedFileSlice::new(
+                    "block_end".to_string(),
+                    Slice::from(132..144),
+                    Slice::from(175..175),
+                ),
+                TemplatedFileSlice::new(
+                    "literal".to_string(),
+                    Slice::from(144..155),
+                    Slice::from(175..186),
+                ),
+                TemplatedFileSlice::new(
+                    "block_start".to_string(),
+                    Slice::from(155..179),
+                    Slice::from(186..186),
+                ),
+                TemplatedFileSlice::new(
+                    "literal".to_string(),
+                    Slice::from(179..189),
+                    Slice::from(186..196),
+                ),
+                TemplatedFileSlice::new(
+                    "templated".to_string(),
+                    Slice::from(189..194),
+                    Slice::from(196..197),
+                ),
+                TemplatedFileSlice::new(
+                    "literal".to_string(),
+                    Slice::from(194..203),
+                    Slice::from(197..206),
+                ),
+                TemplatedFileSlice::new(
+                    "literal".to_string(),
+                    Slice::from(179..189),
+                    Slice::from(206..216),
+                ),
+                TemplatedFileSlice::new(
+                    "templated".to_string(),
+                    Slice::from(189..194),
+                    Slice::from(216..217),
+                ),
+                TemplatedFileSlice::new(
+                    "literal".to_string(),
+                    Slice::from(194..203),
+                    Slice::from(217..226),
+                ),
+                TemplatedFileSlice::new(
+                    "literal".to_string(),
+                    Slice::from(179..189),
+                    Slice::from(226..236),
+                ),
+                TemplatedFileSlice::new(
+                    "templated".to_string(),
+                    Slice::from(189..194),
+                    Slice::from(236..237),
+                ),
+                TemplatedFileSlice::new(
+                    "literal".to_string(),
+                    Slice::from(194..203),
+                    Slice::from(237..246),
+                ),
+                TemplatedFileSlice::new(
+                    "block_end".to_string(),
+                    Slice::from(203..215),
+                    Slice::from(246..246),
+                ),
+                TemplatedFileSlice::new(
+                    "literal".to_string(),
+                    Slice::from(215..230),
+                    Slice::from(246..261),
+                ),
+            ],
+            raw_sliced: raw_sliced.clone(),
+            source_str: raw_sliced
+                .iter()
+                .map(|slice| &*slice.raw)
+                .collect::<String>(),
+            templated_str: None,
+        }
     }
 
     #[test]
@@ -892,8 +1013,8 @@ mod tests {
 
     #[test]
     fn test_templated_file_find_slice_indices_of_templated_pos() {
-        let complex_file_kwargs = &*COMPLEX_FILE_KWARGS;
-        let simple_file_kwargs = &*SIMPLE_FILE_KWARGS;
+        let complex_file_kwargs = complex_file_kwargs();
+        let simple_file_kwargs = simple_file_kwargs();
         let test_cases: Vec<(usize, bool, TestFileArgs, usize, usize)> = vec![
             (100, true, complex_file_kwargs.clone(), 10, 11),
             (13, true, complex_file_kwargs.clone(), 0, 3),
@@ -924,8 +1045,8 @@ mod tests {
 
     #[test]
     fn test_templated_file_templated_slice_to_source_slice() {
-        let complex_file_kwargs = &*COMPLEX_FILE_KWARGS;
-        let simple_file_kwargs = &*SIMPLE_FILE_KWARGS;
+        let complex_file_kwargs = complex_file_kwargs();
+        let simple_file_kwargs = simple_file_kwargs();
         let test_cases: Vec<(
             String,
             String,
@@ -941,10 +1062,14 @@ mod tests {
                 "foo.sql".to_string(),
                 "x".repeat(20).to_string(),
                 None,
-                5..10,
-                5..10,
+                Slice::from(5..10),
+                Slice::from(5..10),
                 true,
-                vec![TemplatedFileSlice::new("literal".to_string(), 0..20, 0..20)],
+                vec![TemplatedFileSlice::new(
+                    "literal".to_string(),
+                    Slice::from(0..20),
+                    Slice::from(0..20),
+                )],
                 vec![RawFileSlice::new("x".repeat(20), "literal".to_string(), 0)],
             ),
             // Trimming the end of a literal (with things that follow).
@@ -952,8 +1077,8 @@ mod tests {
                 "test.sql".to_string(),
                 complex_file_kwargs.source_str.clone(),
                 None,
-                10..13,
-                10..13,
+                Slice::from(10..13),
+                Slice::from(10..13),
                 true,
                 complex_file_kwargs.sliced_file.clone(),
                 complex_file_kwargs.raw_sliced.clone(),
@@ -963,13 +1088,13 @@ mod tests {
                 "foo.sql".to_string(),
                 "x".repeat(70).to_string(),
                 None,
-                5..10,
-                55..60,
+                Slice::from(5..10),
+                Slice::from(55..60),
                 true,
                 vec![TemplatedFileSlice::new(
                     "literal".to_string(),
-                    50..70,
-                    0..20,
+                    Slice::from(50..70),
+                    Slice::from(0..20),
                 )],
                 vec![
                     RawFileSlice::new("x".repeat(50), "literal".to_string(), 0),
@@ -981,13 +1106,25 @@ mod tests {
                 "test.sql".to_string(),
                 "01234\n6789{{foo}}fo\nbarss".to_string(),
                 Some("01234\n6789x\nfo\nbarss".to_string()),
-                5..15,
-                5..20,
+                Slice::from(5..15),
+                Slice::from(5..20),
                 false,
                 vec![
-                    TemplatedFileSlice::new("literal".to_string(), 0..10, 0..10),
-                    TemplatedFileSlice::new("templated".to_string(), 10..17, 10..12),
-                    TemplatedFileSlice::new("literal".to_string(), 17..25, 12..20),
+                    TemplatedFileSlice::new(
+                        "literal".to_string(),
+                        Slice::from(0..10),
+                        Slice::from(0..10),
+                    ),
+                    TemplatedFileSlice::new(
+                        "templated".to_string(),
+                        Slice::from(10..17),
+                        Slice::from(10..12),
+                    ),
+                    TemplatedFileSlice::new(
+                        "literal".to_string(),
+                        Slice::from(17..25),
+                        Slice::from(12..20),
+                    ),
                 ],
                 vec![
                     RawFileSlice::new("x".repeat(10), "literal".to_string(), 0),
@@ -1000,8 +1137,8 @@ mod tests {
                 simple_file_kwargs.clone().fname,
                 simple_file_kwargs.clone().source_str,
                 simple_file_kwargs.clone().templated_str,
-                5..15,
-                0..25,
+                Slice::from(5..15),
+                Slice::from(0..25),
                 false,
                 simple_file_kwargs
                     .sliced_file
@@ -1031,8 +1168,8 @@ mod tests {
                 simple_file_kwargs.fname.clone(),
                 simple_file_kwargs.source_str.clone(),
                 simple_file_kwargs.templated_str.clone(),
-                10..10,
-                10..10,
+                Slice::from(10..10),
+                Slice::from(10..10),
                 true,
                 simple_file_kwargs.sliced_file.clone(),
                 simple_file_kwargs.raw_sliced.clone(),
@@ -1041,8 +1178,8 @@ mod tests {
                 simple_file_kwargs.fname.clone(),
                 simple_file_kwargs.source_str.clone(),
                 simple_file_kwargs.templated_str.clone(),
-                12..12,
-                17..17,
+                Slice::from(12..12),
+                Slice::from(17..17),
                 true,
                 simple_file_kwargs.sliced_file.clone(),
                 simple_file_kwargs.raw_sliced.clone(),
@@ -1054,8 +1191,8 @@ mod tests {
                     let mut sliced_file = simple_file_kwargs.sliced_file.clone();
                     sliced_file.push(TemplatedFileSlice::new(
                         "comment".to_string(),
-                        25..35,
-                        20..20,
+                        Slice::from(25..35),
+                        Slice::from(20..20),
                     ));
                     sliced_file
                 };
@@ -1068,8 +1205,8 @@ mod tests {
                     "foo.sql".to_string(),
                     extended_source_str,
                     None,
-                    20..20,
-                    25..25,
+                    Slice::from(20..20),
+                    Slice::from(25..25),
                     true,
                     extended_sliced_file,
                     extended_raw_sliced,
@@ -1080,8 +1217,8 @@ mod tests {
                 complex_file_kwargs.fname.clone(),
                 complex_file_kwargs.source_str.clone(),
                 complex_file_kwargs.templated_str.clone(),
-                43..43,
-                87..87,
+                Slice::from(43..43),
+                Slice::from(87..87),
                 true,
                 complex_file_kwargs.sliced_file.clone(),
                 complex_file_kwargs.raw_sliced.clone(),
@@ -1090,8 +1227,8 @@ mod tests {
                 complex_file_kwargs.fname.clone(),
                 complex_file_kwargs.source_str.clone(),
                 complex_file_kwargs.templated_str.clone(),
-                13..13,
-                13..13,
+                Slice::from(13..13),
+                Slice::from(13..13),
                 true,
                 complex_file_kwargs.sliced_file.clone(),
                 complex_file_kwargs.raw_sliced.clone(),
@@ -1100,8 +1237,8 @@ mod tests {
                 complex_file_kwargs.fname.clone(),
                 complex_file_kwargs.source_str.clone(),
                 complex_file_kwargs.templated_str.clone(),
-                186..186,
-                155..155,
+                Slice::from(186..186),
+                Slice::from(155..155),
                 true,
                 complex_file_kwargs.sliced_file.clone(),
                 complex_file_kwargs.raw_sliced.clone(),
@@ -1111,8 +1248,8 @@ mod tests {
                 complex_file_kwargs.fname.clone(),
                 complex_file_kwargs.source_str.clone(),
                 complex_file_kwargs.templated_str.clone(),
-                100..130,
-                68..110,
+                Slice::from(100..130),
+                Slice::from(68..110),
                 false,
                 complex_file_kwargs.sliced_file.clone(),
                 complex_file_kwargs.raw_sliced.clone(),
@@ -1138,7 +1275,7 @@ mod tests {
                 Some(raw_sliced),
             );
             let source_slice = file.templated_slice_to_source_slice(in_slice.clone());
-            let literal_test = file.is_source_slice_literal(source_slice.clone());
+            let literal_test = file.is_source_slice_literal(&source_slice);
             assert_eq!(
                 (is_literal, source_slice.clone()),
                 (literal_test, out_slice)
@@ -1154,4 +1291,3 @@ mod tests {
     //     assert_eq!(instr, &tf.source_str);
     // }
 }
- */
