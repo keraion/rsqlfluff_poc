@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
-use pyo3::{pyclass, pymethods, FromPyObject};
+use pyo3::{pyclass, pymethods};
 
 use crate::{
     get_lexers,
     marker::PositionMarker,
     matcher::{LexMatcher, LexedElement},
     slice::Slice,
-    templater::{TemplatedFile, TemplatedFileSlice},
+    templater::{fileslice::TemplatedFileSlice, templatefile::TemplatedFile},
     token::Token,
     Dialect,
 };
@@ -513,11 +513,8 @@ pub fn is_zero_slice(s: &Slice) -> bool {
     s.start == s.stop
 }
 
-#[derive(FromPyObject)]
 pub enum LexInput {
-    #[pyo3(transparent, annotation = "str")]
     String(String),
-    #[pyo3(transparent, annotation = "TemplatedFile")]
     TemplatedFile(TemplatedFile),
 }
 
@@ -571,6 +568,36 @@ fn violations_from_tokens(tokens: &[Token]) -> Vec<SQLLexError> {
             )
         })
         .collect()
+}
+
+pub mod python {
+    use crate::templater::templatefile::python::{PySqlFluffTemplatedFile, PyTemplatedFile};
+    use super::LexInput;
+    use pyo3::prelude::*;
+
+    #[derive(FromPyObject)]
+    pub enum PyLexInput {
+        #[pyo3(transparent, annotation = "str")]
+        String(String),
+        #[pyo3(transparent, annotation = "TemplatedFile")]
+        PySqlFluffTemplatedFile(PySqlFluffTemplatedFile),
+        #[pyo3(transparent, annotation = "TemplatedFile")]
+        PyTemplatedFile(PyTemplatedFile),
+    }
+
+    impl Into<LexInput> for PyLexInput {
+        fn into(self) -> LexInput {
+            match self {
+                PyLexInput::String(s) => LexInput::String(s),
+                PyLexInput::PySqlFluffTemplatedFile(py_sql_fluff_templated_file) => {
+                    LexInput::TemplatedFile(py_sql_fluff_templated_file.into())
+                }
+                PyLexInput::PyTemplatedFile(py_templated_file) => {
+                    LexInput::TemplatedFile(py_templated_file.into())
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use pyo3::pyclass;
 
 use crate::slice::Slice;
-use crate::templater::TemplatedFile;
+use crate::templater::templatefile::TemplatedFile;
 
 #[pyclass]
 #[derive(Debug, Clone)]

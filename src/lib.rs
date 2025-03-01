@@ -8,9 +8,12 @@ pub mod token;
 // include!(concat!(env!("OUT_DIR"), "/dialect_matcher.rs"));
 
 use dialect::matcher::*;
-use lexer::{LexInput, SQLLexError};
+use lexer::{python::PyLexInput, SQLLexError};
 use pyo3::prelude::*;
-use templater::PyTemplatedFile;
+use templater::{
+    fileslice::python::{PyRawFileSlice, PyTemplatedFileSlice},
+    templatefile::python::PyTemplatedFile,
+};
 use token::Token;
 
 use std::str::FromStr;
@@ -19,12 +22,12 @@ use std::str::FromStr;
 #[pyo3(name = "lex")]
 #[pyo3(signature = (input, template_blocks_indent, dialect))]
 fn py_lex(
-    input: LexInput,
+    input: PyLexInput,
     template_blocks_indent: bool,
     dialect: String,
 ) -> PyResult<(Vec<Token>, Vec<SQLLexError>)> {
     let dialect = Dialect::from_str(&dialect).expect("Invalid dialect");
-    Ok(lexer::lex(input, template_blocks_indent, dialect))
+    Ok(lexer::lex(input.into(), template_blocks_indent, dialect))
 }
 
 /// A Python module implemented in Rust.
@@ -32,6 +35,8 @@ fn py_lex(
 fn rsqlfluff(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Token>()?;
     m.add_class::<PyTemplatedFile>()?;
+    m.add_class::<PyTemplatedFileSlice>()?;
+    m.add_class::<PyRawFileSlice>()?;
     m.add_function(wrap_pyfunction!(py_lex, m)?)?;
     Ok(())
 }

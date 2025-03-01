@@ -3,105 +3,9 @@ use std::{
     collections::HashMap,
 };
 
-use pyo3::{pyclass, pymethods, types::{PyAnyMethods, PyType}, Bound, FromPyObject, IntoPyObject, PyResult};
-
 use crate::slice::Slice;
 
-#[derive(Debug, PartialEq, Clone, FromPyObject, IntoPyObject)]
-pub struct RawFileSlice {
-    pub raw: String, // Source string
-    pub slice_type: String,
-    pub source_idx: usize, // Offset from beginning of source string
-    // Block index, incremented on start or end block tags, e.g. "if", "for".
-    // This is used in `BaseRule.discard_unsafe_fixes()` to reject any fixes
-    // which span multiple templated blocks.
-    pub block_idx: usize,
-    // The command of a templated tag, e.g. "if", "for"
-    // This is used in template tracing as a kind of cache to identify the kind
-    // of template element this is without having to re-extract it each time.
-    pub tag: Option<String>,
-}
-
-impl RawFileSlice {
-    pub fn new(raw: String, slice_type: String, source_idx: usize) -> Self {
-        RawFileSlice {
-            raw,
-            slice_type,
-            source_idx,
-            block_idx: 0,
-            tag: None,
-        }
-    }
-
-    pub fn end_source_idx(&self) -> usize {
-        // Return the closing index of this slice.
-        self.source_idx + self.raw.len()
-    }
-
-    pub fn source_slice(&self) -> Slice {
-        Slice::from(self.source_idx..self.end_source_idx())
-    }
-
-    pub fn is_source_only_slice(&self) -> bool {
-        // Based on its slice_type, does it only appear in the *source*?
-        // There are some slice types which are automatically source only.
-        // There are *also* some which are source only because they render
-        // to an empty string.
-        // TODO: should any new logic go here?
-        match self.slice_type.as_str() {
-            "comment" | "block_end" | "block_start" | "block_mid" => true,
-            _ => false,
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Clone, FromPyObject, IntoPyObject)]
-pub struct TemplatedFileSlice {
-    pub slice_type: String,
-    pub source_slice: Slice,
-    pub templated_slice: Slice,
-}
-
-impl TemplatedFileSlice {
-    pub fn new(slice_type: String, source_slice: Slice, templated_slice: Slice) -> Self {
-        TemplatedFileSlice {
-            slice_type,
-            source_slice,
-            templated_slice,
-        }
-    }
-}
-
-#[pyclass(name = "TemplatedFile")]
-#[repr(transparent)]
-#[derive(Clone)]
-pub struct PyTemplatedFile(TemplatedFile);
-
-#[pymethods]
-impl PyTemplatedFile {
-    #[new]
-    #[pyo3(signature = (source_str, fname, templated_str=None, sliced_file=None, raw_sliced=None))]
-    pub fn new(
-        source_str: String,
-        fname: String,
-        templated_str: Option<String>,
-        sliced_file: Option<Vec<TemplatedFileSlice>>,
-        raw_sliced: Option<Vec<RawFileSlice>>,
-    ) -> Self {
-        Self(TemplatedFile::new(
-            source_str,
-            fname,
-            templated_str,
-            sliced_file,
-            raw_sliced,
-        ))
-    }
-
-    #[classmethod]
-    pub fn from_string(_cls: &Bound<'_, PyType>, raw: String) -> Self {
-        Self(TemplatedFile::from(raw))
-    }
-}
+use super::fileslice::{RawFileSlice, TemplatedFileSlice};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct TemplatedFile {
@@ -112,106 +16,10 @@ pub struct TemplatedFile {
     pub raw_sliced: Vec<RawFileSlice>,
     source_newlines: Vec<usize>,
     templated_newlines: Vec<usize>,
-}
-
-impl<'py> FromPyObject<'py> for TemplatedFile {
-    fn extract_bound(obj: &pyo3::Bound<'py, pyo3::PyAny>) -> PyResult<Self> {
-        let source_str = obj.getattr("source_str")?.extract::<String>()?;
-        let fname = obj.getattr("fname")?.extract::<String>()?;
-        let templated_str = obj.getattr("templated_str")?.extract::<String>()?;
-        let mut py_sliced_file = obj
-            .getattr("sliced_file")?
-            .extract::<Vec<TemplatedFileSlice>>()?;
-        let sliced_file =
-            TemplatedFile::py_templated_slices(&source_str, &templated_str, &mut py_sliced_file)
-                .to_owned();
-
-        let mut py_raw_sliced = obj.getattr("raw_sliced")?.extract::<Vec<RawFileSlice>>()?;
-        let raw_sliced = TemplatedFile::py_raw_slices(&mut py_raw_sliced).to_owned();
-
-        Ok(TemplatedFile::from_python(
-            source_str,
-            fname,
-            templated_str,
-            sliced_file,
-            raw_sliced,
-        ))
-    }
-}
-
-impl TemplatedFile {
-    fn py_raw_slices(raw_slices: &mut [RawFileSlice]) -> &mut [RawFileSlice] {
-        if raw_slices.len() == 1 {
-            return raw_slices;
-        }
-        let mut idx = 0;
-        for slice in raw_slices.iter_mut() {
-            slice.source_idx = idx;
-            idx += slice.raw.len();
-        }
-        raw_slices
-    }
-
-    fn py_templated_slices<'a>(
-        source_str: &str,
-        templated_str: &str,
-        templated_slices: &'a mut [TemplatedFileSlice],
-    ) -> &'a mut [TemplatedFileSlice] {
-        if source_str.len()
-            == templated_slices
-                .last()
-                .map(|s| s.source_slice.stop)
-                .unwrap_or(0)
-            && source_str.len()
-                == templated_slices
-                    .last()
-                    .map(|s| s.templated_slice.stop)
-                    .unwrap_or(0)
-        {
-            return templated_slices;
-        }
-        let mut char_source_str = source_str.char_indices().enumerate();
-        let mut char_templated_str = templated_str.char_indices().enumerate();
-        for slice in templated_slices.iter_mut() {
-            slice.source_slice.start = char_source_str
-                .find(|&(i, _ci)| i == slice.source_slice.start)
-                .map(|(_i, (ci, _c))| ci)
-                .unwrap_or(0);
-            slice.source_slice.stop = char_source_str
-                .find(|&(i, _ci)| i == slice.source_slice.stop)
-                .map(|(_i, (ci, _c))| ci)
-                .unwrap_or(source_str.len());
-            slice.templated_slice.start = char_templated_str
-                .find(|&(i, _ci)| i == slice.source_slice.start)
-                .map(|(_i, (ci, _c))| ci)
-                .unwrap_or(0);
-            slice.templated_slice.stop = char_templated_str
-                .find(|&(i, _ci)| i == slice.source_slice.stop)
-                .map(|(_i, (ci, _c))| ci)
-                .unwrap_or(templated_str.len());
-        }
-        templated_slices
-    }
-
-    fn from_python(
-        source_str: String,
-        fname: String,
-        templated_str: String,
-        sliced_file: Vec<TemplatedFileSlice>,
-        raw_sliced: Vec<RawFileSlice>,
-    ) -> Self {
-        let source_newlines = iter_indices_of_newlines(&source_str).collect();
-        let templated_newlines = iter_indices_of_newlines(&templated_str).collect();
-        TemplatedFile {
-            source_str,
-            fname,
-            templated_str,
-            sliced_file,
-            raw_sliced,
-            source_newlines,
-            templated_newlines,
-        }
-    }
+    // py_sliced_file: Vec<RsTemplatedFileSlice>,
+    // py_raw_sliced: Vec<RawFileSlice>,
+    // py_source_newlines: Vec<usize>,
+    // py_templated_newlines: Vec<usize>,
 }
 
 impl TemplatedFile {
@@ -310,6 +118,12 @@ impl TemplatedFile {
             }
         }
 
+        // let py_sliced_file =
+        //     TemplatedFile::utf8_to_unicode_slices(&source_str, &templated_str_in, &sliced_file);
+        // let py_raw_sliced = TemplatedFile::raw_slices_to_py(&raw_sliced.clone());
+        // let py_source_newlines = iter_indices_of_unicode_newlines(&source_str).collect();
+        // let py_templated_newlines = iter_indices_of_unicode_newlines(&source_str).collect();
+
         TemplatedFile {
             source_str,
             fname,
@@ -318,6 +132,10 @@ impl TemplatedFile {
             raw_sliced,
             source_newlines,
             templated_newlines,
+            // py_sliced_file,
+            // py_raw_sliced,
+            // py_source_newlines,
+            // py_templated_newlines,
         }
     }
 
@@ -625,6 +443,335 @@ impl std::fmt::Display for TemplatedFile {
 
 fn iter_indices_of_newlines(raw_str: &str) -> impl Iterator<Item = usize> + '_ {
     raw_str.match_indices('\n').map(|(idx, _)| idx)
+}
+
+pub mod python {
+    use std::ops::Deref;
+
+    use pyo3::{prelude::*, types::PyType};
+
+    use crate::templater::fileslice::python::sqlfluff::{
+        PySqlFluffRawFileSlice, PySqlFluffTemplatedFileSlice,
+    };
+    use crate::templater::fileslice::python::*;
+    use crate::templater::fileslice::{RawFileSlice, TemplatedFileSlice};
+
+    use super::{iter_indices_of_newlines, TemplatedFile};
+
+    #[pyclass(name = "TemplatedFile")]
+    #[repr(transparent)]
+    #[derive(Clone)]
+    pub struct PyTemplatedFile(pub TemplatedFile);
+
+    #[pymethods]
+    impl PyTemplatedFile {
+        #[new]
+        #[pyo3(signature = (source_str, fname, templated_str=None, sliced_file=None, raw_sliced=None))]
+        pub fn new(
+            source_str: String,
+            fname: String,
+            templated_str: Option<String>,
+            sliced_file: Option<Vec<PyTemplatedFileSlice>>,
+            raw_sliced: Option<Vec<PyRawFileSlice>>,
+        ) -> Self {
+            Self(TemplatedFile::new(
+                source_str,
+                fname,
+                templated_str,
+                sliced_file.map(|x| x.into_iter().map(Into::into).collect()),
+                raw_sliced.map(|x| x.into_iter().map(Into::into).collect()),
+            ))
+        }
+
+        #[classmethod]
+        pub fn from_string(_cls: &Bound<'_, PyType>, raw: String) -> Self {
+            Self(TemplatedFile::from(raw))
+        }
+
+        #[getter]
+        fn source_str(&self) -> PyResult<String> {
+            Ok(self.0.source_str.clone())
+        }
+
+        #[getter]
+        fn fname(&self) -> PyResult<String> {
+            Ok(self.0.fname.clone())
+        }
+
+        #[getter]
+        fn templated_str(&self) -> PyResult<String> {
+            Ok(self.0.templated_str.clone())
+        }
+
+        #[getter]
+        fn sliced_file(&self) -> PyResult<Vec<PyTemplatedFileSlice>> {
+            let slices = self.utf8_to_unicode_slices();
+            Ok(slices)
+        }
+
+        #[getter]
+        fn raw_sliced(&self) -> PyResult<Vec<PyRawFileSlice>> {
+            let slices = self.raw_slices_to_py();
+            Ok(slices)
+        }
+
+        #[getter("_source_newlines")]
+        fn source_newlines(&self) -> PyResult<Vec<usize>> {
+            let newlines = iter_indices_of_unicode_newlines(&self.0.source_str).collect();
+            Ok(newlines)
+        }
+
+        #[getter("_templated_newlines")]
+        fn templated_newlines(&self) -> PyResult<Vec<usize>> {
+            let newlines = iter_indices_of_unicode_newlines(&self.0.templated_str).collect();
+            Ok(newlines)
+        }
+
+        fn __str__(&self) -> PyResult<String> {
+            Ok(self.0.templated_str.clone())
+        }
+
+        fn __repr__(&self) -> PyResult<String> {
+            Ok(String::from("<TemplatedFile>"))
+        }
+
+        fn get_line_pos_of_char_pos(
+            &self,
+            char_pos: usize,
+            source: bool,
+        ) -> PyResult<(usize, usize)> {
+            Ok(self.0.get_line_pos_of_char_pos(char_pos, source))
+        }
+
+        fn utf8_to_unicode_slices(&self) -> Vec<PyTemplatedFileSlice> {
+            let mut char_source_str = self.0.source_str.char_indices().map(|(i, _)| i).enumerate();
+            let mut char_templated_str = self
+                .0
+                .templated_str
+                .char_indices()
+                .map(|(i, _)| i)
+                .enumerate();
+
+            self.0
+                .sliced_file
+                .iter()
+                .map(|slice| {
+                    let mut new_slice = slice.clone();
+
+                    new_slice.source_slice.start = char_source_str
+                        .find(|&(_, ci)| ci == slice.source_slice.start)
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                    new_slice.source_slice.stop = char_source_str
+                        .find(|&(_, ci)| ci == slice.source_slice.stop)
+                        .map(|(i, _)| i)
+                        .unwrap_or(self.0.source_str.chars().count());
+
+                    new_slice.templated_slice.start = char_templated_str
+                        .find(|&(_, ci)| ci == slice.templated_slice.start)
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                    new_slice.templated_slice.stop = char_templated_str
+                        .find(|&(_, ci)| ci == slice.templated_slice.stop)
+                        .map(|(i, _)| i)
+                        .unwrap_or(self.0.templated_str.chars().count());
+
+                    PyTemplatedFileSlice(new_slice)
+                })
+                .collect()
+        }
+    }
+
+    impl PyTemplatedFile {
+        fn from_python(
+            source_str: String,
+            fname: String,
+            templated_str: String,
+            sliced_file: Vec<TemplatedFileSlice>,
+            raw_sliced: Vec<RawFileSlice>,
+        ) -> Self {
+            let source_newlines = iter_indices_of_newlines(&source_str).collect();
+            let templated_newlines = iter_indices_of_newlines(&templated_str).collect();
+            Self(TemplatedFile {
+                source_str,
+                fname,
+                templated_str,
+                sliced_file,
+                raw_sliced,
+                source_newlines,
+                templated_newlines,
+            })
+        }
+
+        fn py_raw_slices(raw_sliced: &[PyRawFileSlice]) -> Vec<RawFileSlice> {
+            if raw_sliced.len() == 1 {
+                return raw_sliced
+                    .into_iter()
+                    .map(|s| s.0.clone())
+                    .collect::<Vec<_>>();
+            }
+            let mut idx = 0;
+            raw_sliced
+                .iter()
+                .map(|rs| {
+                    let mut slice = rs.0.clone();
+                    slice.source_idx = idx;
+                    idx += slice.raw.len();
+                    slice
+                })
+                .collect()
+        }
+
+        fn raw_slices_to_py(&self) -> Vec<PyRawFileSlice> {
+            if self.0.raw_sliced.len() == 1 {
+                return self
+                    .0
+                    .raw_sliced
+                    .clone()
+                    .into_iter()
+                    .map(Into::into)
+                    .collect();
+            }
+            let mut idx = 0;
+            self.0
+                .raw_sliced
+                .iter()
+                .map(|rs| {
+                    let mut slice = rs.clone();
+                    slice.source_idx = idx;
+                    idx += slice.raw.chars().count();
+                    PyRawFileSlice(slice)
+                })
+                .collect()
+        }
+
+        fn unicode_to_utf8_slices(
+            source_str: &str,
+            templated_str: &str,
+            sliced_file: &[PyTemplatedFileSlice],
+        ) -> Vec<TemplatedFileSlice> {
+            if source_str.len()
+                == sliced_file
+                    .last()
+                    .map(|s| s.0.source_slice.stop)
+                    .unwrap_or(0)
+                && source_str.len()
+                    == sliced_file
+                        .last()
+                        .map(|s| s.0.templated_slice.stop)
+                        .unwrap_or(0)
+            {
+                return sliced_file.iter().map(|ts| ts.0.clone()).collect();
+            }
+            let mut char_source_str = source_str.char_indices().enumerate();
+            let mut char_templated_str = templated_str.char_indices().enumerate();
+
+            sliced_file
+                .iter()
+                .map(|py_slice| {
+                    let mut new_slice = py_slice.0.clone(); // Extract TemplatedFileSlice and clone it
+
+                    new_slice.source_slice.start = char_source_str
+                        .find(|&(i, _ci)| i == new_slice.source_slice.start)
+                        .map(|(_i, (ci, _c))| ci)
+                        .unwrap_or(0);
+                    new_slice.source_slice.stop = char_source_str
+                        .find(|&(i, _ci)| i == new_slice.source_slice.stop)
+                        .map(|(_i, (ci, _c))| ci)
+                        .unwrap_or(source_str.len());
+
+                    new_slice.templated_slice.start = char_templated_str
+                        .find(|&(i, _ci)| i == new_slice.templated_slice.start)
+                        .map(|(_i, (ci, _c))| ci)
+                        .unwrap_or(0);
+                    new_slice.templated_slice.stop = char_templated_str
+                        .find(|&(i, _ci)| i == new_slice.templated_slice.stop)
+                        .map(|(_i, (ci, _c))| ci)
+                        .unwrap_or(templated_str.len());
+
+                    new_slice
+                })
+                .collect()
+        }
+    }
+
+    impl From<TemplatedFile> for PyTemplatedFile {
+        fn from(value: TemplatedFile) -> Self {
+            PyTemplatedFile(value)
+        }
+    }
+
+    impl From<PyTemplatedFile> for TemplatedFile {
+        fn from(value: PyTemplatedFile) -> Self {
+            value.0
+        }
+    }
+
+    #[derive(Clone)]
+    pub struct PySqlFluffTemplatedFile(pub PyTemplatedFile);
+
+    impl<'py> FromPyObject<'py> for PySqlFluffTemplatedFile {
+        fn extract_bound(obj: &pyo3::Bound<'py, pyo3::PyAny>) -> PyResult<Self> {
+            let source_str = obj.getattr("source_str")?.extract::<String>()?;
+            let fname = obj.getattr("fname")?.extract::<String>()?;
+            let templated_str = obj.getattr("templated_str")?.extract::<String>()?;
+            let py_sliced_file = obj
+                .getattr("sliced_file")?
+                .extract::<Vec<PySqlFluffTemplatedFileSlice>>()?
+                .into_iter()
+                .map(Into::into)
+                .collect::<Vec<_>>();
+            let sliced_file = PyTemplatedFile::unicode_to_utf8_slices(
+                &source_str,
+                &templated_str,
+                &py_sliced_file,
+            );
+
+            let py_raw_sliced = obj
+                .getattr("raw_sliced")?
+                .extract::<Vec<PySqlFluffRawFileSlice>>()?
+                .into_iter()
+                .map(Into::into)
+                .collect::<Vec<_>>();
+            let raw_sliced = PyTemplatedFile::py_raw_slices(&py_raw_sliced);
+
+            let py_source_newlines = obj.getattr("_source_newlines")?.extract::<Vec<usize>>()?;
+            let py_templated_newlines = obj
+                .getattr("_templated_newlines")?
+                .extract::<Vec<usize>>()?;
+
+            Ok(Self(
+                PyTemplatedFile::from_python(
+                    source_str,
+                    fname,
+                    templated_str,
+                    sliced_file,
+                    raw_sliced,
+                )
+                .into(),
+            ))
+        }
+    }
+
+    impl Into<PyTemplatedFile> for PySqlFluffTemplatedFile {
+        fn into(self) -> PyTemplatedFile {
+            PyTemplatedFile(self.0 .0)
+        }
+    }
+
+    impl Into<TemplatedFile> for PySqlFluffTemplatedFile {
+        fn into(self) -> TemplatedFile {
+            self.0 .0
+        }
+    }
+
+    fn iter_indices_of_unicode_newlines(raw_str: &str) -> impl Iterator<Item = usize> + '_ {
+        raw_str
+            .char_indices()
+            .enumerate()
+            .filter(|&(_i, (_ci, c))| c == '\n')
+            .map(|(i, (_, _))| i)
+    }
 }
 
 /*

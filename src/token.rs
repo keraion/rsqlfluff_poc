@@ -1,6 +1,6 @@
 use std::{fmt::Display, sync::Arc};
 
-use crate::{marker::PositionMarker, slice::Slice, templater::TemplatedFile};
+use crate::{marker::PositionMarker, slice::Slice, templater::templatefile::TemplatedFile};
 use pyo3::{pyclass, pymethods};
 use uuid::Uuid;
 
