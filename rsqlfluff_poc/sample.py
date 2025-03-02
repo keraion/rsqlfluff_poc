@@ -14,13 +14,14 @@ def run_lexer(
     file: str,
     print_results = True,
 ):
-    lexer = Lexer(dialect=dialect)
     py_start = time.time()
+    lexer = Lexer(dialect=dialect)
     py_out = lexer.lex(sql)
     py_end = time.time()
 
     rs_start = time.time()
-    rs_out = rsqlfluff.lex(sql, True, dialect)
+    lexer = rsqlfluff.Lexer(dialect=dialect)
+    rs_out = lexer.lex(sql, True)
     rs_end = time.time()
     for p, r in zip(py_out[0], rs_out[0]):
         assert p.raw == r.raw
@@ -35,7 +36,7 @@ def run_lexer(
             break
 
 
-print("name,dialect,file,sql_len,py_dur,rs_dur,py_dur/rs_dur")
+# print("name,dialect,file,sql_len,py_dur,rs_dur,py_dur/rs_dur")
 
 # Load all the dialects before measuring, don't print the output here
 for dialect in dialect_readout():

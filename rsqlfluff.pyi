@@ -24,6 +24,10 @@ class TemplatedFile:
 class Token:
     raw: str
 
-def lex(
-    raw: Union[str, TemplatedFile], indent_template: bool, dialect: str
-) -> Tuple[List[Token], List[Any]]: ...
+class SQLLexError: ...
+
+class Lexer:
+    def __init__(self, dialect: str): ...
+    def lex(
+        self, lex_input: Union[str, TemplatedFile], template_blocks_indent: bool
+    ) -> Tuple[List[Token], List[Any]]: ...

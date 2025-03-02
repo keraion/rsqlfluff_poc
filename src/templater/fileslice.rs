@@ -89,7 +89,7 @@ pub mod python {
         }
     }
 
-    #[pyclass(name = "PyTemplatedFileSlice")]
+    #[pyclass(name = "TemplatedFileSlice")]
     #[repr(transparent)]
     #[derive(Clone, Debug, PartialEq)]
     pub struct PyTemplatedFileSlice(pub(crate) TemplatedFileSlice);

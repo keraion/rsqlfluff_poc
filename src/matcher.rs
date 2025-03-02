@@ -361,6 +361,9 @@ pub fn extract_nested_block_comment(input: &str, dialect: Dialect) -> Option<&st
     }
 }
 
+// TODO: implement python passthroughs
+pub mod python{}
+
 #[cfg(test)]
 mod test {
     use crate::{dialect::matcher::Dialect, token::Token};

@@ -143,16 +143,13 @@ impl TemplateElement {
     }
 }
 
-#[pyclass]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SQLLexError {
     pub msg: String,
     pub pos_marker: PositionMarker,
 }
 
-#[pymethods]
 impl SQLLexError {
-    #[new]
     fn new(msg: String, pos_marker: PositionMarker) -> Self {
         Self { msg, pos_marker }
     }
@@ -160,7 +157,6 @@ impl SQLLexError {
 
 pub struct Lexer {
     last_resort_lexer: LexMatcher,
-    dialect: Dialect,
     matcher: Vec<LexMatcher>,
 }
 
@@ -181,10 +177,10 @@ impl Lexer {
         let matcher = get_lexers(dialect).to_owned();
         Self {
             last_resort_lexer,
-            dialect,
             matcher,
         }
     }
+
     pub fn lex_string<'a>(&'a self, mut input: &'a str) -> Vec<LexedElement<'a>> {
         let mut element_buffer = Vec::with_capacity(input.len());
 
@@ -212,7 +208,7 @@ impl Lexer {
             .find_map(|matcher| matcher.scan_match(input))
     }
 
-    pub fn map_template_slices(
+    fn map_template_slices(
         &self,
         elements: &[LexedElement],
         template: &TemplatedFile,
@@ -583,8 +579,12 @@ pub enum LexInput {
 }
 
 pub mod python {
-    use super::LexInput;
-    use crate::templater::templatefile::python::{PySqlFluffTemplatedFile, PyTemplatedFile};
+    use std::str::FromStr;
+
+    use super::{LexInput, Lexer, SQLLexError};
+    use crate::{
+        dialect::matcher::Dialect, marker::PositionMarker, matcher::LexMatcher, templater::templatefile::python::{PySqlFluffTemplatedFile, PyTemplatedFile}, token::Token
+    };
     use pyo3::prelude::*;
 
     #[derive(FromPyObject)]
@@ -608,6 +608,49 @@ pub mod python {
                     LexInput::TemplatedFile(py_templated_file.into())
                 }
             }
+        }
+    }
+
+    #[pyclass(name="SQLLexerError")]
+    #[repr(transparent)]
+    pub struct PySQLLexError(SQLLexError);
+
+    #[pymethods]
+    impl PySQLLexError {
+        #[new]
+        fn new(msg: String, pos_marker: PositionMarker) -> Self {
+            Self(SQLLexError::new(msg, pos_marker))
+        }
+    }
+
+    impl Into<SQLLexError> for PySQLLexError {
+        fn into(self) -> SQLLexError {
+            self.0
+        }
+    }
+
+    impl From<SQLLexError> for PySQLLexError {
+        fn from(value: SQLLexError) -> Self {
+            Self(value)
+        }
+    }
+
+    #[pyclass(name="Lexer")]
+    #[repr(transparent)]
+    pub struct PyLexer(pub Lexer);
+
+    #[pymethods]
+    impl PyLexer {
+        #[new]
+        #[pyo3(signature = (dialect))]
+        pub fn new(dialect: &str) -> Self {
+            let dialect = Dialect::from_str(&dialect).expect("Invalid dialect");
+            Self(Lexer::new(None, dialect))
+        }
+
+        pub fn lex(&self, input: PyLexInput, template_blocks_indent: bool) -> (Vec<Token>, Vec<PySQLLexError>)  {
+            let (tokens, violations) = self.0.lex(input.into(), template_blocks_indent);
+            (tokens, violations.into_iter().map(Into::into).collect())
         }
     }
 }
