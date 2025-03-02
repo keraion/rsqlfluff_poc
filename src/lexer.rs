@@ -143,39 +143,6 @@ impl TemplateElement {
     }
 }
 
-pub fn lex_string<'a>(
-    mut input: &'a str,
-    lexer_matchers: &'a [LexMatcher],
-    last_resort_lexer: &'a LexMatcher,
-) -> Vec<LexedElement<'a>> {
-    let mut element_buffer: Vec<LexedElement> = Vec::with_capacity(input.len());
-
-    while !input.is_empty() {
-        if let Some((elements, match_length)) =
-            lex_match(input, lexer_matchers).or_else(|| last_resort_lexer.scan_match(input))
-        {
-            element_buffer.extend(elements);
-            input = &input[match_length..];
-        } else {
-            panic!(
-                "Fatal. Unable to lex characters: {}",
-                &input[..input.chars().take(10).count()]
-            );
-        };
-    }
-
-    element_buffer
-}
-
-pub fn lex_match<'a>(
-    input: &'a str,
-    lexer_matchers: &'a [LexMatcher],
-) -> Option<(Vec<LexedElement<'a>>, usize)> {
-    lexer_matchers
-        .iter()
-        .find_map(|matcher| matcher.scan_match(input))
-}
-
 #[pyclass]
 #[derive(Debug)]
 pub struct SQLLexError {
@@ -191,59 +158,156 @@ impl SQLLexError {
     }
 }
 
-pub fn map_template_slices(
-    elements: &[LexedElement],
-    template: &TemplatedFile,
-) -> Vec<TemplateElement> {
-    let mut idx = 0;
-    let mut templated_buff = Vec::new();
+pub struct Lexer {
+    last_resort_lexer: LexMatcher,
+    dialect: Dialect,
+    matcher: Vec<LexMatcher>,
+}
 
-    for element in elements {
-        let element_len = element.raw.len();
-        let template_slice = Slice::from(idx..idx + element_len);
-        idx += element_len;
+impl Lexer {
+    pub fn new(last_resort_lexer: Option<LexMatcher>, dialect: Dialect) -> Self {
+        let last_resort_lexer = last_resort_lexer.unwrap_or_else(|| {
+            LexMatcher::regex_lexer(
+                dialect,
+                "<unlexable>",
+                r#"[^\t\n\ ]*"#,
+                Token::unlexable_token,
+                None,
+                None,
+                None,
+                |_| true,
+            )
+        });
+        let matcher = get_lexers(dialect).to_owned();
+        Self {
+            last_resort_lexer,
+            dialect,
+            matcher,
+        }
+    }
+    pub fn lex_string<'a>(&'a self, mut input: &'a str) -> Vec<LexedElement<'a>> {
+        let mut element_buffer = Vec::with_capacity(input.len());
 
-        // Create a TemplateElement from the LexedElement and the template slice
-        let templated_element = TemplateElement::from_element(element, template_slice.clone());
-        templated_buff.push(templated_element);
+        while !input.is_empty() {
+            if let Some((elements, match_length)) = self
+                .lex_match(input)
+                .or_else(|| self.last_resort_lexer.scan_match(input))
+            {
+                element_buffer.extend(elements);
+                input = &input[match_length..];
+            } else {
+                panic!(
+                    "Fatal. Unable to lex characters: {}",
+                    &input[..input.chars().take(10).count()]
+                );
+            };
+        }
 
-        // Validate that the slice matches the element's raw content
-        if template.templated_str[template_slice.as_range()] != *element.raw {
-            panic!(
+        element_buffer
+    }
+
+    pub fn lex_match<'a>(&'a self, input: &'a str) -> Option<(Vec<LexedElement<'a>>, usize)> {
+        self.matcher
+            .iter()
+            .find_map(|matcher| matcher.scan_match(input))
+    }
+
+    pub fn map_template_slices(
+        &self,
+        elements: &[LexedElement],
+        template: &TemplatedFile,
+    ) -> Vec<TemplateElement> {
+        let mut idx = 0;
+        let mut templated_buff = Vec::new();
+
+        for element in elements {
+            let element_len = element.raw.len();
+            let template_slice = Slice::from(idx..idx + element_len);
+            idx += element_len;
+
+            // Create a TemplateElement from the LexedElement and the template slice
+            let templated_element = TemplateElement::from_element(element, template_slice.clone());
+            templated_buff.push(templated_element);
+
+            // Validate that the slice matches the element's raw content
+            if template.templated_str[template_slice.as_range()] != *element.raw {
+                panic!(
                 "Template and lexed elements do not match. This should never happen  {:?} != {:?}",
                 &element.raw,
                 &template.templated_str[template_slice.as_range()]
             )
+            }
         }
+
+        templated_buff
     }
 
-    templated_buff
-}
+    fn elements_to_tokens(
+        &self,
+        elements: &[TemplateElement],
+        templated_file: &Arc<TemplatedFile>,
+        template_blocks_indent: bool,
+    ) -> Vec<Token> {
+        log::info!("Elements to Segments.");
 
-fn elements_to_tokens(
-    elements: &[TemplateElement],
-    templated_file: &Arc<TemplatedFile>,
-    template_blocks_indent: bool,
-) -> Vec<Token> {
-    log::info!("Elements to Segments.");
+        // Convert elements into segments using an iterator
+        let mut segment_buffer: Vec<Token> =
+            iter_tokens(elements, templated_file, template_blocks_indent);
 
-    // Convert elements into segments using an iterator
-    let mut segment_buffer: Vec<Token> =
-        iter_tokens(elements, templated_file, template_blocks_indent);
+        // Add an EndOfFile marker
+        let eof_marker = if let Some(last_segment) = segment_buffer.last() {
+            Token::end_of_file_token(last_segment.pos_marker.end_point_marker(), false, None)
+        } else {
+            Token::end_of_file_token(
+                PositionMarker::from_point(0, 0, templated_file, None, None),
+                false,
+                None,
+            )
+        };
+        segment_buffer.push(eof_marker);
 
-    // Add an EndOfFile marker
-    let eof_marker = if let Some(last_segment) = segment_buffer.last() {
-        Token::end_of_file_token(last_segment.pos_marker.end_point_marker(), false, None)
-    } else {
-        Token::end_of_file_token(
-            PositionMarker::from_point(0, 0, templated_file, None, None),
-            false,
-            None,
-        )
-    };
-    segment_buffer.push(eof_marker);
+        segment_buffer
+    }
 
-    segment_buffer
+    pub fn lex(
+        &self,
+        raw: LexInput,
+        template_blocks_indent: bool,
+    ) -> (Vec<Token>, Vec<SQLLexError>) {
+        let (template, str_buff) = match raw {
+            LexInput::String(raw_str) => {
+                let template = TemplatedFile::from(raw_str.clone());
+                (Arc::new(template), raw_str)
+            }
+            LexInput::TemplatedFile(template_file) => {
+                let str_buff = template_file.to_string();
+                (Arc::new(template_file), str_buff)
+            }
+        };
+
+        let lexed_elements = self.lex_string(&str_buff);
+        let templated_buffer = self.map_template_slices(&lexed_elements, &template);
+        let tokens = self.elements_to_tokens(&templated_buffer, &template, template_blocks_indent);
+
+        let violations = Lexer::violations_from_tokens(&tokens);
+        (tokens, violations)
+    }
+
+    fn violations_from_tokens(tokens: &[Token]) -> Vec<SQLLexError> {
+        tokens
+            .iter()
+            .filter(|t| t.token_type.as_ref().is_some_and(|tt| tt == "unlexable"))
+            .map(|token| {
+                SQLLexError::new(
+                    format!(
+                        "Unable to lex characters: {}",
+                        token.raw.chars().take(10).collect::<String>()
+                    ),
+                    token.pos_marker.clone(),
+                )
+            })
+            .collect()
+    }
 }
 
 fn iter_tokens(
@@ -518,61 +582,9 @@ pub enum LexInput {
     TemplatedFile(TemplatedFile),
 }
 
-pub fn lex(
-    raw: LexInput,
-    template_blocks_indent: bool,
-    dialect: Dialect,
-) -> (Vec<Token>, Vec<SQLLexError>) {
-    let (template, str_buff) = match raw {
-        LexInput::String(raw_str) => {
-            let template = TemplatedFile::from(raw_str.clone());
-            (Arc::new(template), raw_str)
-        }
-        LexInput::TemplatedFile(template_file) => {
-            let str_buff = template_file.to_string();
-            (Arc::new(template_file), str_buff)
-        }
-    };
-
-    let matcher = get_lexers(dialect);
-    let last_resort_lexer = LexMatcher::regex_lexer(
-        Dialect::Ansi,
-        "<unlexable>",
-        r#"[^\t\n\ ]*"#,
-        Token::unlexable_token,
-        None,
-        None,
-        None,
-        |_| true,
-    );
-
-    let lexed_elements = lex_string(&str_buff, &matcher, &last_resort_lexer);
-    let templated_buffer = map_template_slices(&lexed_elements, &template);
-    let tokens = elements_to_tokens(&templated_buffer, &template, template_blocks_indent);
-
-    let violations = violations_from_tokens(&tokens);
-    (tokens, violations)
-}
-
-fn violations_from_tokens(tokens: &[Token]) -> Vec<SQLLexError> {
-    tokens
-        .iter()
-        .filter(|t| t.token_type.as_ref().is_some_and(|tt| tt == "unlexable"))
-        .map(|token| {
-            SQLLexError::new(
-                format!(
-                    "Unable to lex characters: {}",
-                    token.raw.chars().take(10).collect::<String>()
-                ),
-                token.pos_marker.clone(),
-            )
-        })
-        .collect()
-}
-
 pub mod python {
-    use crate::templater::templatefile::python::{PySqlFluffTemplatedFile, PyTemplatedFile};
     use super::LexInput;
+    use crate::templater::templatefile::python::{PySqlFluffTemplatedFile, PyTemplatedFile};
     use pyo3::prelude::*;
 
     #[derive(FromPyObject)]
@@ -661,8 +673,10 @@ mod tests {
             ),
         ];
 
+        let lexer = Lexer::new(None, Dialect::Ansi);
+
         for (raw, res) in test_cases {
-            let (tokens, _) = lex(LexInput::String(raw.to_string()), true, Dialect::Ansi);
+            let (tokens, _) = lexer.lex(LexInput::String(raw.to_string()), true);
             for token in &tokens {
                 println!("{:?}", token);
             }
@@ -677,7 +691,8 @@ mod tests {
         FROM table_2 WHERE a / b = 3   "  ;"#
                 .to_string(),
         );
-        let (_tokens, violations) = lex(raw, true, Dialect::Ansi);
+        let lexer = Lexer::new(None, Dialect::Ansi);
+        let (_tokens, violations) = lexer.lex(raw, true);
 
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].msg, "Unable to lex characters: \"");
@@ -686,80 +701,12 @@ mod tests {
     }
 
     #[test]
-    fn test_scan() {
-        let raw = LexInput::String(
-            r#"SELECT 1 
-        FROM table_2 WHERE a / b = 3 || "hahaha"     ;"#
-                .to_string(),
-        );
-        let (template, str_buff) = match raw {
-            LexInput::String(raw_str) => {
-                let template = TemplatedFile::from(raw_str.clone());
-                (Arc::new(template), raw_str)
-            }
-            LexInput::TemplatedFile(template_file) => {
-                let str_buff = template_file.to_string();
-                (Arc::new(template_file), str_buff)
-            }
-        };
-
-        let matcher = get_lexers(Dialect::Ansi);
-        let last_resort_lexer = LexMatcher::regex_lexer(
-            Dialect::Ansi,
-            "<unlexable>",
-            r#"[^\t\n\ ]*"#,
-            Token::unlexable_token,
-            None,
-            None,
-            None,
-            |_| true,
-        );
-        let test_case = lex_string(
-            r#"SELECT 1 
-        FROM table_2 WHERE a / b = 3 || "hahaha"     ;"#,
-            &matcher,
-            &last_resort_lexer,
-        );
-        // for element in test_case {
-        //     println!(r#"{} <"{}">"#, element.matcher.name, element.raw);
-        // }
-        let templated_buffer = map_template_slices(&test_case, &template);
-        // for e in x {
-        //     println!(
-        //         "{} : {} : {} - {}",
-        //         e.matcher.name, e.raw, e.template_slice.start, e.template_slice.end
-        //     )
-        // }
-        let tokens = elements_to_tokens(&templated_buffer, &template, false);
-        for token in tokens {
-            println!(
-                "{}: {} : '{}'",
-                token.pos_marker.to_source_string(),
-                token.token_type.unwrap_or("None".to_string()),
-                token.raw.escape_debug(),
-            )
-        }
-    }
-
-    #[test]
     fn test_scan_broken_quotes() {
         env_logger::init();
-        let matcher = get_lexers(Dialect::Ansi);
-        let last_resort_lexer = LexMatcher::regex_lexer(
-            Dialect::Ansi,
-            "<unlexable>",
-            r"[^\t\n\ ]*",
-            Token::unlexable_token,
-            None,
-            None,
-            None,
-            |_| true,
-        );
-        let test_case = lex_string(
+        let lexer = Lexer::new(None, Dialect::Ansi);
+        let test_case = lexer.lex_string(
             r#"SELECT 1 
         FROM table_2 WHERE a / b = 3   "  ;"#,
-            &matcher,
-            &last_resort_lexer,
         );
         for element in test_case {
             println!(r#"{} <"{}">"#, element.matcher.name, element.raw);
@@ -1043,25 +990,15 @@ SELECT * FROM "_1234логистика"."_1234εμπορικός";
             }
         };
 
-        let matcher = get_lexers(Dialect::Ansi);
-        let last_resort_lexer = LexMatcher::regex_lexer(
-            Dialect::Ansi,
-            "<unlexable>",
-            r#"[^\t\n\ ]*"#,
-            Token::unlexable_token,
-            None,
-            None,
-            None,
-            |_| true,
-        );
+        let lexer = Lexer::new(None, Dialect::Ansi);
         let t0 = Instant::now();
-        let test_case = lex_string(&str_buff, &matcher, &last_resort_lexer);
+        let test_case = lexer.lex_string(&str_buff);
         let duration = t0.elapsed(); // Calculate elapsed time
         println!("lex_string time: {:?}", duration);
         // for element in test_case {
         //     println!(r#"{} <"{}">"#, element.matcher.name, element.raw);
         // }
-        let templated_buffer = map_template_slices(&test_case, &template);
+        let templated_buffer = lexer.map_template_slices(&test_case, &template);
         // for e in x {
         //     println!(
         //         "{} : {} : {} - {}",
@@ -1070,7 +1007,7 @@ SELECT * FROM "_1234логистика"."_1234εμπορικός";
         // }
         let duration = t0.elapsed(); // Calculate elapsed time
         println!("map_template_slices time: {:?}", duration);
-        let _tokens = elements_to_tokens(&templated_buffer, &template, false);
+        let _tokens = lexer.elements_to_tokens(&templated_buffer, &template, false);
         // for token in tokens {
         //     println!(
         //         "{}: {} : '{}'",
