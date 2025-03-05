@@ -21,10 +21,21 @@ class TemplatedFile:
     sliced_file: List[TemplatedFileSlice]
     raw_sliced: List[RawFileSlice]
 
+class PositionMarker:
+    source_slice: slice
+    templated_slice: slice
+    templated_file: TemplatedFile
+    working_line_no: int
+    working_line_pos: int
+
 class Token:
     raw: str
+    pos_marker: PositionMarker
+    type: Optional[str]
 
-class SQLLexError: ...
+class SQLLexError:
+    msg: str
+    pos_marker: PositionMarker
 
 class Lexer:
     def __init__(self, dialect: str): ...

@@ -12,8 +12,9 @@ use crate::{
     Dialect,
 };
 
+use hashbrown::{HashMap, HashSet};
+
 use std::{
-    collections::HashMap,
     fmt::Display,
     ops::{Bound, RangeBounds},
 };
@@ -252,12 +253,18 @@ impl Lexer {
 
         // Add an EndOfFile marker
         let eof_marker = if let Some(last_segment) = segment_buffer.last() {
-            Token::end_of_file_token(last_segment.pos_marker.end_point_marker(), false, None)
+            Token::end_of_file_token(
+                last_segment.pos_marker.end_point_marker(),
+                false,
+                None,
+                HashSet::new(),
+            )
         } else {
             Token::end_of_file_token(
                 PositionMarker::from_point(0, 0, templated_file, None, None),
                 false,
                 None,
+                HashSet::new(),
             )
         };
         segment_buffer.push(eof_marker);
@@ -277,7 +284,7 @@ impl Lexer {
             }
             LexInput::TemplatedFile(template_file) => {
                 let str_buff = template_file.to_string();
-                (Arc::new(template_file), str_buff)
+                (template_file, str_buff)
             }
         };
 
@@ -464,17 +471,28 @@ fn handle_zero_length_slice(
             );
 
             if add_indents {
-                segments.push(Token::dedent_token(pos_marker.clone(), true, None))
+                segments.push(Token::dedent_token(
+                    pos_marker.clone(),
+                    true,
+                    None,
+                    HashSet::new(),
+                ))
             }
 
             //TODO: TemplateLoop
             segments.push(Token::template_loop_token(
                 pos_marker.clone(),
                 Some(block_stack.top()),
+                HashSet::new(),
             ));
 
             if add_indents {
-                segments.push(Token::indent_token(pos_marker.clone(), true, None))
+                segments.push(Token::indent_token(
+                    pos_marker.clone(),
+                    true,
+                    None,
+                    HashSet::new(),
+                ))
             }
             return segments.into_iter();
         }
@@ -499,6 +517,7 @@ fn handle_zero_length_slice(
                 pos_marker,
                 true,
                 Some(block_stack.top()),
+                HashSet::new(),
             ))
         }
 
@@ -509,6 +528,7 @@ fn handle_zero_length_slice(
             tfs.slice_type.clone(),
             templated_file,
             Some(block_stack.top()),
+            HashSet::new(),
         ));
 
         if tfs.slice_type == "block_end" {
@@ -526,6 +546,7 @@ fn handle_zero_length_slice(
                 pos_marker,
                 true,
                 Some(block_stack.top()),
+                HashSet::new(),
             ));
         }
 
@@ -549,6 +570,7 @@ fn handle_zero_length_slice(
                 placeholder_str,
                 "skipped_source".to_string(),
                 None,
+                HashSet::new(),
             ));
         }
 
@@ -564,6 +586,7 @@ fn handle_zero_length_slice(
         tfs.slice_type.clone(),
         templated_file,
         None,
+        HashSet::new(),
     ));
 
     segments.into_iter()
@@ -575,7 +598,7 @@ pub fn is_zero_slice(s: &Slice) -> bool {
 
 pub enum LexInput {
     String(String),
-    TemplatedFile(TemplatedFile),
+    TemplatedFile(Arc<TemplatedFile>),
 }
 
 pub mod python {
@@ -583,9 +606,18 @@ pub mod python {
 
     use super::{LexInput, Lexer, SQLLexError};
     use crate::{
-        dialect::matcher::Dialect, marker::PositionMarker, matcher::LexMatcher, templater::templatefile::python::{PySqlFluffTemplatedFile, PyTemplatedFile}, token::Token
+        config::fluffconfig::python::PyFluffConfig,
+        dialect::matcher::Dialect,
+        marker::{python::PyPositionMarker, PositionMarker},
+        matcher::LexMatcher,
+        templater::templatefile::python::{PySqlFluffTemplatedFile, PyTemplatedFile},
+        token::python::PyToken,
     };
-    use pyo3::prelude::*;
+    use hashbrown::HashMap;
+    use pyo3::{
+        prelude::*,
+        types::{PyDict, PyList, PyTuple},
+    };
 
     #[derive(FromPyObject)]
     pub enum PyLexInput {
@@ -611,15 +643,23 @@ pub mod python {
         }
     }
 
-    #[pyclass(name="SQLLexerError")]
+    #[pyclass(name = "SQLLexerError")]
     #[repr(transparent)]
     pub struct PySQLLexError(SQLLexError);
 
     #[pymethods]
     impl PySQLLexError {
         #[new]
-        fn new(msg: String, pos_marker: PositionMarker) -> Self {
-            Self(SQLLexError::new(msg, pos_marker))
+        fn new(msg: String, pos_marker: PyPositionMarker) -> Self {
+            Self(SQLLexError::new(msg, pos_marker.0))
+        }
+
+        fn msg(&self) -> String {
+            self.0.msg.clone()
+        }
+
+        fn pos_marker(&self) -> PyPositionMarker {
+            PyPositionMarker(self.0.pos_marker.clone())
         }
     }
 
@@ -635,22 +675,54 @@ pub mod python {
         }
     }
 
-    #[pyclass(name="Lexer")]
+    #[pyclass(name = "Lexer")]
     #[repr(transparent)]
     pub struct PyLexer(pub Lexer);
 
     #[pymethods]
     impl PyLexer {
         #[new]
-        #[pyo3(signature = (dialect))]
-        pub fn new(dialect: &str) -> Self {
-            let dialect = Dialect::from_str(&dialect).expect("Invalid dialect");
+        #[pyo3(signature = (config=None, last_resort_lexer=None, dialect=None))]
+        pub fn new(
+            config: Option<PyFluffConfig>,
+            last_resort_lexer: Option<&Bound<'_, PyDict>>,
+            dialect: Option<&str>,
+        ) -> Self {
+            let cfg_dialect = config
+                .map(|cfg| cfg.0.dialect.map(|d| Dialect::from_str(&d).ok()))
+                .flatten()
+                .flatten();
+            let in_dialect = dialect.map(|d| Dialect::from_str(d).ok()).flatten();
+            if cfg_dialect.is_some() && in_dialect.is_some() {
+                panic!("Lexer does not support setting both `config` and `dialect`.")
+            }
+            let dialect = cfg_dialect.unwrap_or_else(|| in_dialect.expect("Dialect not defined"));
             Self(Lexer::new(None, dialect))
         }
 
-        pub fn lex(&self, input: PyLexInput, template_blocks_indent: bool) -> (Vec<Token>, Vec<PySQLLexError>)  {
+        #[pyo3(signature = (input, template_blocks_indent = true))]
+        pub fn lex<'py>(
+            &self,
+            py: Python<'py>,
+            input: PyLexInput,
+            template_blocks_indent: bool,
+        ) -> Result<Bound<'py, PyTuple>, PyErr> {
             let (tokens, violations) = self.0.lex(input.into(), template_blocks_indent);
-            (tokens, violations.into_iter().map(Into::into).collect())
+
+            let token_tuple = PyTuple::new(
+                py,
+                tokens.into_iter().map(Into::into).collect::<Vec<PyToken>>(),
+            )?;
+            let violation_list = PyList::new(
+                py,
+                violations
+                    .into_iter()
+                    .map(Into::into)
+                    .collect::<Vec<PySQLLexError>>(),
+            )?;
+
+            let obj = (token_tuple, violation_list);
+            obj.into_pyobject(py)
         }
     }
 }
@@ -1029,7 +1101,7 @@ SELECT * FROM "_1234логистика"."_1234εμπορικός";
             }
             LexInput::TemplatedFile(template_file) => {
                 let str_buff = template_file.to_string();
-                (Arc::new(template_file), str_buff)
+                (template_file, str_buff)
             }
         };
 

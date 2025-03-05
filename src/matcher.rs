@@ -1,6 +1,7 @@
 use std::{fmt::Display, time::Instant};
 
 use fancy_regex::{Regex as FancyRegex, RegexBuilder as FancyRegexBuilder};
+use hashbrown::HashSet;
 use regex::{Regex, RegexBuilder};
 
 use crate::{dialect::matcher::Dialect, marker::PositionMarker, token::Token};
@@ -40,7 +41,7 @@ pub struct LexMatcher {
     pub dialect: Dialect,
     pub name: String,
     pub mode: LexerMode,
-    pub token_class_func: fn(String, PositionMarker) -> Token,
+    pub token_class_func: fn(String, PositionMarker, HashSet<String>) -> Token,
     pub subdivider: Option<Box<LexMatcher>>,
     pub trim_post_subdivide: Option<Box<LexMatcher>>,
 }
@@ -56,7 +57,7 @@ impl LexMatcher {
         dialect: Dialect,
         name: &str,
         template: &str,
-        token_class_func: fn(String, PositionMarker) -> Token,
+        token_class_func: fn(String, PositionMarker, HashSet<String>) -> Token,
         subdivider: Option<Box<LexMatcher>>,
         trim_post_subdivide: Option<Box<LexMatcher>>,
     ) -> Self {
@@ -74,7 +75,7 @@ impl LexMatcher {
         dialect: Dialect,
         name: &str,
         pattern: &str,
-        token_class_func: fn(String, PositionMarker) -> Token,
+        token_class_func: fn(String, PositionMarker, HashSet<String>) -> Token,
         subdivider: Option<Box<LexMatcher>>,
         trim_post_subdivide: Option<Box<LexMatcher>>,
         fallback_lexer: Option<fn(&str, Dialect) -> Option<&str>>,
@@ -108,7 +109,7 @@ impl LexMatcher {
         dialect: Dialect,
         name: &str,
         template: &str,
-        token_class_func: fn(String, PositionMarker) -> Token,
+        token_class_func: fn(String, PositionMarker, HashSet<String>) -> Token,
         subdivider: Option<Box<LexMatcher>>,
         trim_post_subdivide: Option<Box<LexMatcher>>,
         fallback_lexer: Option<fn(&str, Dialect) -> Option<&str>>,
@@ -131,7 +132,7 @@ impl LexMatcher {
         dialect: Dialect,
         name: &str,
         template: &str,
-        token_class_func: fn(String, PositionMarker) -> Token,
+        token_class_func: fn(String, PositionMarker, HashSet<String>) -> Token,
         subdivider: Option<Box<LexMatcher>>,
         trim_post_subdivide: Option<Box<LexMatcher>>,
         fallback_lexer: Option<fn(&str, Dialect) -> Option<&str>>,
@@ -320,7 +321,7 @@ impl LexMatcher {
         //     segment_class_types
         // };
 
-        (self.token_class_func)(raw.to_string(), pos_marker)
+        (self.token_class_func)(raw.to_string(), pos_marker, HashSet::new())
     }
 }
 

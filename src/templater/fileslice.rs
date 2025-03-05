@@ -1,6 +1,6 @@
 use crate::slice::Slice;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Hash)]
 pub struct RawFileSlice {
     pub raw: String, // Source string
     pub slice_type: String,
@@ -48,7 +48,7 @@ impl RawFileSlice {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Hash)]
 pub struct TemplatedFileSlice {
     pub slice_type: String,
     pub source_slice: Slice,
@@ -76,6 +76,30 @@ pub mod python {
     #[repr(transparent)]
     #[derive(Clone, Debug, PartialEq)]
     pub struct PyRawFileSlice(pub(crate) RawFileSlice);
+
+    #[pymethods]
+    impl PyRawFileSlice {
+        #[getter]
+        pub fn raw(&self) -> String {
+            self.0.raw.clone()
+        }
+        #[getter]
+        pub fn slice_type(&self) -> String {
+            self.0.slice_type.clone()
+        }
+        #[getter]
+        pub fn source_idx(&self) -> usize {
+            self.0.source_idx
+        }
+        #[getter]
+        pub fn block_idx(&self) -> usize {
+            self.0.block_idx
+        }
+        #[getter]
+        pub fn tag(&self) -> Option<String> {
+            self.0.tag.clone()
+        }
+    }
 
     impl Into<RawFileSlice> for PyRawFileSlice {
         fn into(self) -> RawFileSlice {
@@ -137,7 +161,7 @@ pub mod python {
 
         use super::{PyRawFileSlice, PyTemplatedFileSlice};
 
-        #[derive(Clone)]
+        #[derive(Clone, IntoPyObject)]
         pub struct PySqlFluffTemplatedFileSlice(pub PyTemplatedFileSlice);
 
         impl<'py> FromPyObject<'py> for PySqlFluffTemplatedFileSlice {

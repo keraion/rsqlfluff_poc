@@ -8,7 +8,6 @@ use pyo3::pyclass;
 use crate::slice::Slice;
 use crate::templater::templatefile::TemplatedFile;
 
-#[pyclass]
 #[derive(Debug, Clone)]
 pub struct PositionMarker {
     pub source_slice: Slice,
@@ -243,4 +242,71 @@ impl Display for PositionMarker {
 
 pub fn slice_is_point(test_slice: &Slice) -> bool {
     test_slice.start == test_slice.stop
+}
+
+pub mod python {
+    use std::{fmt::Display, sync::Arc};
+
+    use pyo3::prelude::*;
+
+    use crate::{
+        slice::Slice,
+        templater::templatefile::{
+            python::{PySqlFluffTemplatedFile, PyTemplatedFile},
+            TemplatedFile,
+        },
+    };
+
+    use super::PositionMarker;
+
+    #[pyclass(name = "PositionMarker", str)]
+    #[derive(Debug, Clone)]
+    pub struct PyPositionMarker(pub PositionMarker);
+
+    #[pymethods]
+    impl PyPositionMarker {
+        #[getter]
+        pub fn source_slice(&self) -> Slice {
+            self.0.source_slice.clone()
+        }
+
+        #[getter]
+        pub fn templated_slice(&self) -> Slice {
+            self.0.templated_slice.clone()
+        }
+
+        #[getter]
+        pub fn templated_file(&self) -> PySqlFluffTemplatedFile {
+            PySqlFluffTemplatedFile(PyTemplatedFile(self.0.templated_file.clone().into()))
+        }
+
+        #[getter]
+        pub fn working_line_no(&self) -> usize {
+            self.0.working_line_no
+        }
+
+        #[getter]
+        pub fn working_line_pos(&self) -> usize {
+            self.0.working_line_pos
+        }
+
+        #[getter]
+        pub fn working_loc(&self) -> (usize, usize) {
+            (self.0.working_line_no, self.0.working_line_pos)
+        }
+
+        pub fn start_point_marker(&self) -> PyPositionMarker {
+            PyPositionMarker(self.0.start_point_marker())
+        }
+
+        pub fn end_point_marker(&self) -> PyPositionMarker {
+            PyPositionMarker(self.0.end_point_marker())
+        }
+    }
+
+    impl Display for PyPositionMarker {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.0.to_source_string())
+        }
+    }
 }

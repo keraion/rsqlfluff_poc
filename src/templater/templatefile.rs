@@ -7,7 +7,7 @@ use crate::slice::Slice;
 
 use super::fileslice::{RawFileSlice, TemplatedFileSlice};
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Hash)]
 pub struct TemplatedFile {
     pub source_str: String,
     pub fname: String,
@@ -432,6 +432,9 @@ fn iter_indices_of_newlines(raw_str: &str) -> impl Iterator<Item = usize> + '_ {
 }
 
 pub mod python {
+    use std::sync::Arc;
+
+    use pyo3::IntoPyObjectExt;
     use pyo3::{prelude::*, types::PyType};
 
     use crate::templater::fileslice::python::sqlfluff::{
@@ -442,10 +445,10 @@ pub mod python {
 
     use super::{iter_indices_of_newlines, TemplatedFile};
 
-    #[pyclass(name = "TemplatedFile")]
+    #[pyclass(name = "TemplatedFile", frozen, eq, hash)]
     #[repr(transparent)]
-    #[derive(Clone)]
-    pub struct PyTemplatedFile(pub TemplatedFile);
+    #[derive(Clone, PartialEq, Hash)]
+    pub struct PyTemplatedFile(pub Arc<TemplatedFile>);
 
     #[pymethods]
     impl PyTemplatedFile {
@@ -458,18 +461,18 @@ pub mod python {
             sliced_file: Option<Vec<PyTemplatedFileSlice>>,
             raw_sliced: Option<Vec<PyRawFileSlice>>,
         ) -> Self {
-            Self(TemplatedFile::new(
+            Self(Arc::new(TemplatedFile::new(
                 source_str,
                 fname,
                 templated_str,
                 sliced_file.map(|x| x.into_iter().map(Into::into).collect()),
                 raw_sliced.map(|x| x.into_iter().map(Into::into).collect()),
-            ))
+            )))
         }
 
         #[classmethod]
         pub fn from_string(_cls: &Bound<'_, PyType>, raw: String) -> Self {
-            Self(TemplatedFile::from(raw))
+            Self(Arc::new(TemplatedFile::from(raw)))
         }
 
         #[getter]
@@ -576,7 +579,7 @@ pub mod python {
         ) -> Self {
             let source_newlines = iter_indices_of_newlines(&source_str).collect();
             let templated_newlines = iter_indices_of_newlines(&templated_str).collect();
-            Self(TemplatedFile {
+            Self(Arc::new(TemplatedFile {
                 source_str,
                 fname,
                 templated_str,
@@ -584,7 +587,7 @@ pub mod python {
                 raw_sliced,
                 source_newlines,
                 templated_newlines,
-            })
+            }))
         }
 
         fn py_raw_slices(raw_sliced: &[PyRawFileSlice]) -> Vec<RawFileSlice> {
@@ -679,15 +682,46 @@ pub mod python {
         }
     }
 
-    impl From<TemplatedFile> for PyTemplatedFile {
-        fn from(value: TemplatedFile) -> Self {
-            PyTemplatedFile(value)
+    // impl From<TemplatedFile> for PyTemplatedFile {
+    //     fn from(value: TemplatedFile) -> Self {
+    //         PyTemplatedFile(value)
+    //     }
+    // }
+
+    // impl Into<TemplatedFile> for PyTemplatedFile {
+    //     fn into(self) -> TemplatedFile {
+    //         self.0
+    //     }
+    // }
+
+    impl From<Arc<TemplatedFile>> for PyTemplatedFile {
+        fn from(value: Arc<TemplatedFile>) -> Self {
+            Self(value)
         }
     }
 
-    impl From<PyTemplatedFile> for TemplatedFile {
-        fn from(value: PyTemplatedFile) -> Self {
-            value.0
+    impl Into<Arc<TemplatedFile>> for PyTemplatedFile {
+        fn into(self) -> Arc<TemplatedFile> {
+            self.0
+        }
+    }
+
+    impl<'py> IntoPyObject<'py> for PySqlFluffTemplatedFile {
+        type Target = PyAny;
+        type Output = Bound<'py, Self::Target>;
+        type Error = PyErr;
+
+        fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+            PyTemplatedFile(Arc::new(TemplatedFile {
+                source_str: self.0 .0.source_str.clone(),
+                fname: self.0 .0.fname.clone(),
+                templated_str: self.0 .0.templated_str.clone(),
+                sliced_file: self.0 .0.sliced_file.clone(),
+                raw_sliced: self.0 .0.raw_sliced.clone(),
+                source_newlines: self.0 .0.source_newlines.clone(),
+                templated_newlines: self.0 .0.templated_newlines.clone(),
+            }))
+            .into_bound_py_any(py)
         }
     }
 
@@ -743,8 +777,8 @@ pub mod python {
         }
     }
 
-    impl Into<TemplatedFile> for PySqlFluffTemplatedFile {
-        fn into(self) -> TemplatedFile {
+    impl Into<Arc<TemplatedFile>> for PySqlFluffTemplatedFile {
+        fn into(self) -> Arc<TemplatedFile> {
             self.0 .0
         }
     }
