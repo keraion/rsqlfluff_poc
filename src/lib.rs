@@ -19,7 +19,7 @@ use templater::{
 use token::python::PyToken;
 
 /// A Python module implemented in Rust.
-#[pymodule]
+#[pymodule(name = "rsqlfluff")]
 fn rsqlfluff(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyToken>()?;
     m.add_class::<PyTemplatedFile>()?;

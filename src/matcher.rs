@@ -41,9 +41,17 @@ pub struct LexMatcher {
     pub dialect: Dialect,
     pub name: String,
     pub mode: LexerMode,
-    pub token_class_func: fn(String, PositionMarker, HashSet<String>) -> Token,
+    pub token_class_func: fn(
+        String,
+        PositionMarker,
+        HashSet<String>,
+        Option<Vec<String>>,
+        Option<Vec<String>>,
+    ) -> Token,
     pub subdivider: Option<Box<LexMatcher>>,
     pub trim_post_subdivide: Option<Box<LexMatcher>>,
+    pub trim_start: Option<Vec<String>>,
+    pub trim_chars: Option<Vec<String>>,
 }
 
 impl Display for LexMatcher {
@@ -57,9 +65,17 @@ impl LexMatcher {
         dialect: Dialect,
         name: &str,
         template: &str,
-        token_class_func: fn(String, PositionMarker, HashSet<String>) -> Token,
+        token_class_func: fn(
+            String,
+            PositionMarker,
+            HashSet<String>,
+            Option<Vec<String>>,
+            Option<Vec<String>>,
+        ) -> Token,
         subdivider: Option<Box<LexMatcher>>,
         trim_post_subdivide: Option<Box<LexMatcher>>,
+        trim_start: Option<Vec<String>>,
+        trim_chars: Option<Vec<String>>,
     ) -> Self {
         Self {
             dialect,
@@ -68,6 +84,8 @@ impl LexMatcher {
             token_class_func,
             subdivider,
             trim_post_subdivide,
+            trim_start,
+            trim_chars,
         }
     }
 
@@ -75,9 +93,17 @@ impl LexMatcher {
         dialect: Dialect,
         name: &str,
         pattern: &str,
-        token_class_func: fn(String, PositionMarker, HashSet<String>) -> Token,
+        token_class_func: fn(
+            String,
+            PositionMarker,
+            HashSet<String>,
+            Option<Vec<String>>,
+            Option<Vec<String>>,
+        ) -> Token,
         subdivider: Option<Box<LexMatcher>>,
         trim_post_subdivide: Option<Box<LexMatcher>>,
+        trim_start: Option<Vec<String>>,
+        trim_chars: Option<Vec<String>>,
         fallback_lexer: Option<fn(&str, Dialect) -> Option<&str>>,
         precheck: fn(&str) -> bool,
     ) -> Self {
@@ -89,7 +115,10 @@ impl LexMatcher {
                     if let Some(fallback) = fallback_lexer {
                         LexerMode::Function(fallback)
                     } else {
-                        panic!("Unable to compile regex {} and no fallback function provided", pattern)
+                        panic!(
+                            "Unable to compile regex {} and no fallback function provided",
+                            pattern
+                        )
                     }
                 }
             },
@@ -102,6 +131,8 @@ impl LexMatcher {
             token_class_func,
             subdivider,
             trim_post_subdivide,
+            trim_start,
+            trim_chars,
         }
     }
 
@@ -109,9 +140,17 @@ impl LexMatcher {
         dialect: Dialect,
         name: &str,
         template: &str,
-        token_class_func: fn(String, PositionMarker, HashSet<String>) -> Token,
+        token_class_func: fn(
+            String,
+            PositionMarker,
+            HashSet<String>,
+            Option<Vec<String>>,
+            Option<Vec<String>>,
+        ) -> Token,
         subdivider: Option<Box<LexMatcher>>,
         trim_post_subdivide: Option<Box<LexMatcher>>,
+        trim_start: Option<Vec<String>>,
+        trim_chars: Option<Vec<String>>,
         fallback_lexer: Option<fn(&str, Dialect) -> Option<&str>>,
         precheck: fn(&str) -> bool,
     ) -> Self {
@@ -123,6 +162,8 @@ impl LexMatcher {
             token_class_func,
             subdivider,
             trim_post_subdivide,
+            trim_start,
+            trim_chars,
             fallback_lexer,
             precheck,
         )
@@ -132,9 +173,17 @@ impl LexMatcher {
         dialect: Dialect,
         name: &str,
         template: &str,
-        token_class_func: fn(String, PositionMarker, HashSet<String>) -> Token,
+        token_class_func: fn(
+            String,
+            PositionMarker,
+            HashSet<String>,
+            Option<Vec<String>>,
+            Option<Vec<String>>,
+        ) -> Token,
         subdivider: Option<Box<LexMatcher>>,
         trim_post_subdivide: Option<Box<LexMatcher>>,
+        trim_start: Option<Vec<String>>,
+        trim_chars: Option<Vec<String>>,
         fallback_lexer: Option<fn(&str, Dialect) -> Option<&str>>,
         precheck: fn(&str) -> bool,
     ) -> Self {
@@ -146,6 +195,8 @@ impl LexMatcher {
             token_class_func,
             subdivider,
             trim_post_subdivide,
+            trim_start,
+            trim_chars,
             fallback_lexer,
             precheck,
         )
@@ -280,48 +331,17 @@ impl LexMatcher {
         elements
     }
 
-    /*
-
-    def construct_segment(self, raw: str, pos_marker: PositionMarker) -> RawSegment:
-        """Construct a segment using the given class a properties.
-
-        Unless an override `type` is provided in the `segment_kwargs`,
-        it is assumed that the `name` of the lexer is designated as the
-        intended `type` of the segment.
-        """
-        # NOTE: Using a private attribute here feels a bit wrong.
-        _segment_class_types = self.segment_class._class_types
-        _kwargs = self.segment_kwargs
-        assert not (
-            "type" in _kwargs and "instance_types" in _kwargs
-        ), f"Cannot set both `type` and `instance_types` in segment kwargs: {_kwargs}"
-        if "type" in _kwargs:
-            # TODO: At some point we should probably deprecate this API and only
-            # allow setting `instance_types`.
-            assert _kwargs["type"]
-            _kwargs["instance_types"] = (_kwargs.pop("type"),)
-        elif "instance_types" not in _kwargs and self.name not in _segment_class_types:
-            _kwargs["instance_types"] = (self.name,)
-        return self.segment_class(raw=raw, pos_marker=pos_marker, **_kwargs)
-
-     */
-
     pub fn construct_token(&self, raw: &str, pos_marker: PositionMarker) -> Token {
-        // let mut segment_class_types = self.token_class_func.instance_types.clone();
-        // let mut segment_class_types = self.token_class_func.clone();
-        // let matcher_instance_types = self.instance_types.clone();
+        let mut class_types = HashSet::new();
+        class_types.insert(self.name.clone());
 
-        // let instance_types = if matcher_instance_types.is_some() {
-        //     matcher_instance_types.unwrap()
-        // } else if !segment_class_types.contains(&self.name.to_string()) {
-        //     let seg_name = self.name.to_string();
-        //     segment_class_types.push(seg_name);
-        //     segment_class_types
-        // } else {
-        //     segment_class_types
-        // };
-
-        (self.token_class_func)(raw.to_string(), pos_marker, HashSet::new())
+        (self.token_class_func)(
+            raw.to_string(),
+            pos_marker,
+            class_types,
+            self.trim_start.clone(),
+            self.trim_chars.clone(),
+        )
     }
 }
 
@@ -363,7 +383,7 @@ pub fn extract_nested_block_comment(input: &str, dialect: Dialect) -> Option<&st
 }
 
 // TODO: implement python passthroughs
-pub mod python{}
+pub mod python {}
 
 #[cfg(test)]
 mod test {
@@ -386,6 +406,8 @@ mod test {
                 None,
                 None,
                 None,
+                None,
+                None,
                 |_| true,
             ))),
             Some(Box::new(LexMatcher::regex_subdivider(
@@ -396,8 +418,12 @@ mod test {
                 None,
                 None,
                 None,
+                None,
+                None,
                 |_| true,
             ))),
+            None,
+            None,
             Some(extract_nested_block_comment),
             |input| input.starts_with("/"),
         );

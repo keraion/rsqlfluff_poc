@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-#[derive(Debug, PartialEq, Hash, Eq, Clone)]
+#[derive(Debug, PartialEq, Hash, Eq, Clone, Copy)]
 pub struct Slice {
     pub start: usize,
     pub stop: usize,

@@ -156,6 +156,7 @@ impl SQLLexError {
     }
 }
 
+#[derive(Clone)]
 pub struct Lexer {
     last_resort_lexer: LexMatcher,
     matcher: Vec<LexMatcher>,
@@ -169,6 +170,8 @@ impl Lexer {
                 "<unlexable>",
                 r#"[^\t\n\ ]*"#,
                 Token::unlexable_token,
+                None,
+                None,
                 None,
                 None,
                 None,
@@ -254,7 +257,11 @@ impl Lexer {
         // Add an EndOfFile marker
         let eof_marker = if let Some(last_segment) = segment_buffer.last() {
             Token::end_of_file_token(
-                last_segment.pos_marker.end_point_marker(),
+                last_segment
+                    .pos_marker
+                    .clone()
+                    .expect("PositionMarker unset")
+                    .end_point_marker(),
                 false,
                 None,
                 HashSet::new(),
@@ -306,7 +313,7 @@ impl Lexer {
                         "Unable to lex characters: {}",
                         token.raw.chars().take(10).collect::<String>()
                     ),
-                    token.pos_marker.clone(),
+                    token.pos_marker.clone().expect("PositionMarker unset"),
                 )
             })
             .collect()
@@ -327,6 +334,7 @@ fn iter_tokens(
         .enumerate()
         .flat_map(|(idx, element)| -> std::vec::IntoIter<Token> {
             log::debug!("  {}: {}. [tfs_idx = {}]", idx, element, tfs_idx);
+            // println!("  {}: {}. [tfs_idx = {}]", idx, element, tfs_idx);
             let mut consumed_length = 0;
             let mut stashed_source_idx = None;
             let mut segments = Vec::new();
@@ -334,8 +342,9 @@ fn iter_tokens(
             // TODO: uhh this seems wrong, check when I have an example templated file
             while let Some(tfs) = templated_file_slices.clone().peek() {
                 log::debug!("      {}: {:?}", tfs_idx, tfs);
+                // println!("      {}: {:?}", tfs_idx, tfs);
 
-                if tfs.templated_slice.len() == 0 {
+                if is_zero_slice(&tfs.templated_slice) {
                     let next_tfs = templated_file_slices.peek();
                     segments.extend(handle_zero_length_slice(
                         tfs,
@@ -352,6 +361,11 @@ fn iter_tokens(
                         let tfs_offset = tfs.source_slice.start - tfs.templated_slice.start;
 
                         if element.template_slice.stop <= tfs.templated_slice.stop {
+                            log::debug!(
+                                "Consuming whole from literal. existing consumed: {}",
+                                consumed_length
+                            );
+                            // println!("Consuming whole from literal. existing consumed: {}", consumed_length);
                             // Consume the whole element within this slice
                             let slice_start = stashed_source_idx.unwrap_or_else(|| {
                                 element.template_slice.start + consumed_length + tfs_offset
@@ -373,6 +387,7 @@ fn iter_tokens(
                             // Move to the next templated slice if it's an exact match
                             if element.template_slice.stop == tfs.templated_slice.stop {
                                 tfs_idx += 1;
+                                templated_file_slices.next();
                             }
                             break;
                         } else {
@@ -405,8 +420,10 @@ fn iter_tokens(
                             }
 
                             if element.template_slice.stop <= tfs.templated_slice.stop {
-                                let slice_start =
-                                    stashed_source_idx.unwrap_or(tfs.source_slice.start);
+                                log::debug!("Contained templated slice");
+                                // println!("Contained templated slice");
+                                let slice_start = stashed_source_idx
+                                    .unwrap_or(tfs.source_slice.start + consumed_length);
                                 segments.push(element.to_token(
                                     PositionMarker::new(
                                         Slice::from(slice_start..tfs.source_slice.stop),
@@ -420,6 +437,7 @@ fn iter_tokens(
 
                                 if element.template_slice.stop == tfs.templated_slice.stop {
                                     tfs_idx += 1;
+                                    templated_file_slices.next();
                                 }
                                 break;
                             } else {
@@ -608,12 +626,10 @@ pub mod python {
     use crate::{
         config::fluffconfig::python::PyFluffConfig,
         dialect::matcher::Dialect,
-        marker::{python::PyPositionMarker, PositionMarker},
-        matcher::LexMatcher,
+        marker::python::PyPositionMarker,
         templater::templatefile::python::{PySqlFluffTemplatedFile, PyTemplatedFile},
         token::python::PyToken,
     };
-    use hashbrown::HashMap;
     use pyo3::{
         prelude::*,
         types::{PyDict, PyList, PyTuple},
@@ -677,6 +693,7 @@ pub mod python {
 
     #[pyclass(name = "Lexer")]
     #[repr(transparent)]
+    #[derive(Clone)]
     pub struct PyLexer(pub Lexer);
 
     #[pymethods]

@@ -1,9 +1,7 @@
+use hashbrown::HashMap;
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
-
-use pyo3::pyclass;
 
 use crate::slice::Slice;
 use crate::templater::templatefile::TemplatedFile;
@@ -59,11 +57,11 @@ impl PositionMarker {
         let lines: Vec<&str> = raw.split('\n').collect();
         if lines.len() > 1 {
             (
-                line_no + lines.len() as usize - 1,
-                lines.last().unwrap().len() as usize,
+                line_no + lines.len() - 1,
+                lines.last().unwrap().len() + 1,
             )
         } else {
-            (line_no, line_pos + raw.len() as usize)
+            (line_no, line_pos + raw.len())
         }
     }
 
@@ -247,6 +245,7 @@ pub fn slice_is_point(test_slice: &Slice) -> bool {
 pub mod python {
     use std::{fmt::Display, sync::Arc};
 
+    use hashbrown::HashMap;
     use pyo3::prelude::*;
 
     use crate::{
@@ -259,7 +258,8 @@ pub mod python {
 
     use super::PositionMarker;
 
-    #[pyclass(name = "PositionMarker", str)]
+    #[pyclass(name = "PositionMarker", str, eq, ord)]
+    #[repr(transparent)]
     #[derive(Debug, Clone)]
     pub struct PyPositionMarker(pub PositionMarker);
 
@@ -302,11 +302,115 @@ pub mod python {
         pub fn end_point_marker(&self) -> PyPositionMarker {
             PyPositionMarker(self.0.end_point_marker())
         }
+
+        pub fn source_position(&self) -> (usize, usize) {
+            self.0.source_position()
+        }
+
+        pub fn templated_position(&self) -> (usize, usize) {
+            self.0.templated_position()
+        }
+
+        pub fn is_literal(&self) -> bool {
+            self.0.is_literal()
+        }
+
+        pub fn with_working_position(&self, line_no: usize, line_pos: usize) -> Self {
+            Self(self.0.with_working_position(line_no, line_pos))
+        }
+
+        pub fn infer_next_position(
+            &self,
+            raw: &str,
+            line_no: usize,
+            line_pos: usize,
+        ) -> (usize, usize) {
+            self.0.infer_next_position(&raw, line_no, line_pos)
+        }
+
+        pub fn line_no(&self) -> usize {
+            self.0.line_no()
+        }
+
+        pub fn line_pos(&self) -> usize {
+            self.0.line_pos()
+        }
+
+        pub fn source_str(&self) -> String {
+            self.0.source_str()
+        }
+
+        pub fn to_source_dict(&self) -> HashMap<String, usize> {
+            self.0.to_source_dict()
+        }
     }
 
     impl Display for PyPositionMarker {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(f, "{}", self.0.to_source_string())
+        }
+    }
+
+    impl Into<PositionMarker> for PyPositionMarker {
+        fn into(self) -> PositionMarker {
+            self.0
+        }
+    }
+
+    impl From<PositionMarker> for PyPositionMarker {
+        fn from(value: PositionMarker) -> Self {
+            Self(value)
+        }
+    }
+
+    impl PartialEq for PyPositionMarker {
+        fn eq(&self, other: &Self) -> bool {
+            self.0.eq(&other.0)
+        }
+    }
+
+    impl PartialOrd for PyPositionMarker {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+            self.0.partial_cmp(&other.0)
+        }
+    }
+
+    #[derive(Clone, IntoPyObject, Debug)]
+    pub struct PySqlFluffPositionMarker(pub PyPositionMarker);
+
+    impl<'py> FromPyObject<'py> for PySqlFluffPositionMarker {
+        fn extract_bound(obj: &pyo3::Bound<'py, pyo3::PyAny>) -> PyResult<Self> {
+            let source_slice = obj.getattr("source_slice")?.extract::<Slice>()?;
+            // dbg!(source_slice);
+            let templated_slice = obj.getattr("templated_slice")?.extract::<Slice>()?;
+            // dbg!(templated_slice);
+            let templated_file: Arc<TemplatedFile> = obj
+                .getattr("templated_file")?
+                .extract::<PySqlFluffTemplatedFile>()?
+                .into();
+            // dbg!(templated_file.clone());
+            // let working_line_no = obj.getattr("working_line_no")?.extract::<usize>()?;
+            // let working_line_pos = obj.getattr("working_line_pos")?.extract::<usize>()?;
+
+            Ok(Self(PyPositionMarker(PositionMarker::new(
+                source_slice,
+                templated_slice,
+                &templated_file,
+                None,
+                None,
+            ))))
+        }
+    }
+
+    impl Into<PyPositionMarker> for PySqlFluffPositionMarker {
+        fn into(self) -> PyPositionMarker {
+            PyPositionMarker(self.0 .0)
+        }
+    }
+
+    impl Into<PositionMarker> for PySqlFluffPositionMarker {
+        fn into(self) -> PositionMarker {
+            self.0 .0
         }
     }
 }

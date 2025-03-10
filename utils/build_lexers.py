@@ -1,6 +1,7 @@
 """For autogenerating rust lexers."""
 
 import re
+from typing import Optional
 
 from sqlfluff.core.dialects import dialect_readout, dialect_selector
 from sqlfluff.core.parser.lexer import LexerType
@@ -50,9 +51,7 @@ pub fn get_lexers(dialect: Dialect) -> &'static Vec<LexMatcher> {{
 
 def generate_lexers():
     print("use once_cell::sync::Lazy;")
-    print(
-        "use crate::matcher::{LexMatcher, extract_nested_block_comment};"
-    )
+    print("use crate::matcher::{LexMatcher, extract_nested_block_comment};")
     print("use std::str::FromStr;")
     print("use crate::token::Token;")
     print()
@@ -112,6 +111,13 @@ def _as_rust_lexer_matcher(lexer_matcher: LexerType, dialect: str, is_subdivide=
         "prompt_command": """|input| input.starts_with("PROMPT")""",
     }
 
+    trim_start: Optional[str] = lexer_matcher.segment_kwargs.get("trim_start")
+    if trim_start:
+        trim_start = 'Some(vec![String::from("' + '"), String::from("'.join(trim_start) + '")])'
+    trim_chars: Optional[str] = lexer_matcher.segment_kwargs.get("trim_chars")
+    if trim_chars:
+        trim_chars = 'Some(vec![String::from("' + '"), String::from("'.join(trim_chars) + '")])'
+
     if lexer_class == "StringLexer":
         rust_fn = "string_lexer"
         template = f'"{lexer_matcher.template}"'
@@ -135,6 +141,8 @@ def _as_rust_lexer_matcher(lexer_matcher: LexerType, dialect: str, is_subdivide=
         Token::{segment_name},
         {subdivider},
         {trim_post_subdivide},
+        {trim_start},
+        {trim_chars},
         {fallback}
         {is_match_valid}
     )"""
