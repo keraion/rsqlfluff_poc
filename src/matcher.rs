@@ -1,4 +1,4 @@
-use std::{fmt::Display, time::Instant};
+use std::fmt::Display;
 
 use fancy_regex::{Regex as FancyRegex, RegexBuilder as FancyRegexBuilder};
 use hashbrown::HashSet;

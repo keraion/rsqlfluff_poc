@@ -347,22 +347,23 @@ impl TemplatedFile {
         subsliced_file: &[TemplatedFileSlice],
         template_slice_start: usize,
     ) -> Option<usize> {
-        let mut point = None;
         let mut insertion_point = None;
+
         for elem in subsliced_file {
             if elem.templated_slice.start == template_slice_start {
-                point = Some(elem.source_slice.start);
-                if insertion_point.is_none() || point.unwrap() < insertion_point.unwrap() {
-                    insertion_point = point;
+                let source_start = elem.source_slice.start;
+                if insertion_point.is_none() || source_start < insertion_point.unwrap() {
+                    insertion_point = Some(source_start);
                 }
             }
             if elem.templated_slice.stop == template_slice_start {
-                point = Some(elem.source_slice.stop);
-                if insertion_point.is_none() || point.unwrap() < insertion_point.unwrap() {
-                    insertion_point = point;
+                let source_stop = elem.source_slice.stop;
+                if insertion_point.is_none() || source_stop < insertion_point.unwrap() {
+                    insertion_point = Some(source_stop);
                 }
             }
         }
+
         insertion_point
     }
 
@@ -576,7 +577,10 @@ pub mod python {
                         .position(|&c| c == new_slice.0.templated_slice.stop)
                         .unwrap_or(char_templated_vec.len());
 
-                    println!("{:?}::{:?}", new_slice.0.source_slice, new_slice.0.templated_slice);
+                    println!(
+                        "{:?}::{:?}",
+                        new_slice.0.source_slice, new_slice.0.templated_slice
+                    );
 
                     new_slice
                 })
@@ -769,10 +773,10 @@ pub mod python {
                 .collect::<Vec<_>>();
             let raw_sliced = PyTemplatedFile::py_raw_slices(&py_raw_sliced);
 
-            let py_source_newlines = obj.getattr("_source_newlines")?.extract::<Vec<usize>>()?;
-            let py_templated_newlines = obj
-                .getattr("_templated_newlines")?
-                .extract::<Vec<usize>>()?;
+            // let py_source_newlines = obj.getattr("_source_newlines")?.extract::<Vec<usize>>()?;
+            // let py_templated_newlines = obj
+            //     .getattr("_templated_newlines")?
+            //     .extract::<Vec<usize>>()?;
 
             Ok(Self(
                 PyTemplatedFile::from_python(

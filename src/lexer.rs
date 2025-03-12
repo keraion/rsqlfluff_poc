@@ -728,6 +728,7 @@ pub mod python {
             last_resort_lexer: Option<&Bound<'_, PyDict>>,
             dialect: Option<&str>,
         ) -> Self {
+            let _last_resort_lexer = last_resort_lexer;
             let cfg_dialect = config
                 .map(|cfg| cfg.0.dialect.map(|d| Dialect::from_str(&d).ok()))
                 .flatten()
