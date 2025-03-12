@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use pyo3::{pyclass, pymethods};
+use log::debug;
 
 use crate::{
     get_lexers,
@@ -46,7 +46,7 @@ impl BlockTracker {
             .clone();
 
         log::debug!(
-            "Entering block stack @ {:?}: {} ({})",
+            "       Entering block stack @ {:?}: {} ({})",
             src_slice,
             uuid,
             if self.map.contains_key(&src_slice) {
@@ -62,7 +62,7 @@ impl BlockTracker {
     /// Exit the current block, removing it from the stack.
     pub fn exit(&mut self) {
         if let Some(uuid) = self.stack.pop() {
-            log::debug!("Exiting block stack: {}", uuid);
+            log::debug!("       Exiting block stack: {}", uuid);
         } else {
             log::warn!("Attempted to exit an empty block stack!");
         }
@@ -101,7 +101,7 @@ impl Display for TemplateElement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "TemplatedElement(raw='{}', template_slice={:?}, matcher={})",
+            "TemplatedElement(raw='{:?}', template_slice={}, matcher={})",
             self.raw, self.template_slice, self.matcher
         )
     }
@@ -329,30 +329,29 @@ fn iter_tokens(
     let mut block_stack = BlockTracker::new();
     let mut templated_file_slices = multipeek(templated_file.sliced_file.iter().peekable());
 
-    lexed_elements
+    let mut yielded_elements: Vec<Token> = lexed_elements
         .iter()
         .enumerate()
         .flat_map(|(idx, element)| -> std::vec::IntoIter<Token> {
             log::debug!("  {}: {}. [tfs_idx = {}]", idx, element, tfs_idx);
-            // println!("  {}: {}. [tfs_idx = {}]", idx, element, tfs_idx);
             let mut consumed_length = 0;
             let mut stashed_source_idx = None;
             let mut segments = Vec::new();
 
-            // TODO: uhh this seems wrong, check when I have an example templated file
-            while let Some(tfs) = templated_file_slices.clone().peek() {
+            while let Some(tfs) = templated_file_slices.peek().cloned() {
                 log::debug!("      {}: {:?}", tfs_idx, tfs);
-                // println!("      {}: {:?}", tfs_idx, tfs);
 
                 if is_zero_slice(&tfs.templated_slice) {
-                    let next_tfs = templated_file_slices.peek();
+                    let next_tfs = templated_file_slices.clone().peek().cloned();
                     segments.extend(handle_zero_length_slice(
-                        tfs,
-                        next_tfs,
+                        &tfs,
+                        next_tfs.as_ref(),
                         &mut block_stack,
                         templated_file,
                         add_indents,
                     ));
+                    tfs_idx += 1;
+                    templated_file_slices.next();
                     continue;
                 }
 
@@ -361,12 +360,10 @@ fn iter_tokens(
                         let tfs_offset = tfs.source_slice.start - tfs.templated_slice.start;
 
                         if element.template_slice.stop <= tfs.templated_slice.stop {
-                            log::debug!(
-                                "Consuming whole from literal. existing consumed: {}",
+                            debug!(
+                                "     Consuming whole from literal. Existing Consumed: {}",
                                 consumed_length
                             );
-                            // println!("Consuming whole from literal. existing consumed: {}", consumed_length);
-                            // Consume the whole element within this slice
                             let slice_start = stashed_source_idx.unwrap_or_else(|| {
                                 element.template_slice.start + consumed_length + tfs_offset
                             });
@@ -384,33 +381,55 @@ fn iter_tokens(
                                 Some(consumed_length..),
                             ));
 
-                            // Move to the next templated slice if it's an exact match
                             if element.template_slice.stop == tfs.templated_slice.stop {
                                 tfs_idx += 1;
                                 templated_file_slices.next();
                             }
+                            templated_file_slices.reset_peek();
                             break;
-                        } else {
-                            // Handle spilling over slices
-                            let incremental_length =
-                                tfs.templated_slice.stop - element.template_slice.start;
-                            segments.push(element.to_token(
-                                PositionMarker::new(
-                                    Slice::from(
-                                        (element.template_slice.start
-                                            + consumed_length
-                                            + tfs_offset)
-                                            ..tfs.templated_slice.stop + tfs_offset,
-                                    ),
-                                    element.template_slice.clone(),
-                                    templated_file,
-                                    None,
-                                    None,
-                                ),
-                                Some(consumed_length..(consumed_length + incremental_length)),
-                            ));
-                            consumed_length += incremental_length;
+                        } else if element.template_slice.start == tfs.templated_slice.stop {
+                            debug!("     NOTE: Missed Skip");
+                            tfs_idx += 1;
                             templated_file_slices.next();
+                            continue;
+                        } else {
+                            debug!("     Consuming whole spanning literal");
+                            if element.matcher.name == "whitespace" {
+                                debug!(
+                                    "     Consuming split whitespace from literal. Existing Consumed: {}",
+                                    consumed_length,
+                                );
+                                let incremental_length =
+                                    tfs.templated_slice.stop - element.template_slice.start;
+                                segments.push(element.to_token(
+                                    PositionMarker::new(
+                                        Slice::from(
+                                            (element.template_slice.start
+                                                + consumed_length
+                                                + tfs_offset)
+                                                ..tfs.templated_slice.stop + tfs_offset,
+                                        ),
+                                        element.template_slice.clone(),
+                                        templated_file,
+                                        None,
+                                        None,
+                                    ),
+                                    Some(consumed_length..(consumed_length + incremental_length)),
+                                ));
+                                consumed_length += incremental_length;
+                            } else {
+                                debug!("     Spilling over literal slice.");
+                                if stashed_source_idx.is_none() {
+                                    stashed_source_idx =
+                                        Some(element.template_slice.start + tfs_offset);
+                                        debug!(
+                                            "     Stashing a source start. {:?}", stashed_source_idx
+                                        );
+                                }
+                                tfs_idx += 1;
+                                templated_file_slices.next();
+                                continue;
+                            }
                         }
                     }
                     "templated" | "block_start" | "escaped" => {
@@ -420,15 +439,13 @@ fn iter_tokens(
                             }
 
                             if element.template_slice.stop <= tfs.templated_slice.stop {
-                                log::debug!("Contained templated slice");
-                                // println!("Contained templated slice");
                                 let slice_start = stashed_source_idx
                                     .unwrap_or(tfs.source_slice.start + consumed_length);
                                 segments.push(element.to_token(
                                     PositionMarker::new(
                                         Slice::from(slice_start..tfs.source_slice.stop),
                                         element.template_slice.clone(),
-                                        &templated_file,
+                                        templated_file,
                                         None,
                                         None,
                                     ),
@@ -439,31 +456,38 @@ fn iter_tokens(
                                     tfs_idx += 1;
                                     templated_file_slices.next();
                                 }
+                                templated_file_slices.reset_peek();
                                 break;
                             } else {
-                                stashed_source_idx = Some(tfs.source_slice.start);
+                                if stashed_source_idx.is_none() {
+                                    stashed_source_idx = Some(tfs.source_slice.start);
+                                }
+                                tfs_idx += 1;
                                 templated_file_slices.next();
+                                continue;
                             }
-                        } else {
-                            // Handle zero-length slices separately
-                            // segments.extend(handle_zero_length_slice(
-                            //     tfs,
-                            //     templated_file_slices_iter.clone().next(),
-                            //     &mut block_stack,
-                            //     &templated_file,
-                            //     add_indents,
-                            // ));
                         }
                     }
                     _ => panic!("Unexpected slice type: {}", tfs.slice_type),
                 }
             }
 
-            // TODO: finalize other zero length templated area
-
             segments.into_iter()
         })
-        .collect::<Vec<_>>()
+        .collect();
+
+    while let Some(tfs) = templated_file_slices.next().cloned() {
+        let next_tfs = templated_file_slices.peek().cloned();
+        yielded_elements.extend(handle_zero_length_slice(
+            &tfs,
+            next_tfs.as_ref(),
+            &mut block_stack,
+            templated_file,
+            add_indents,
+        ));
+    }
+
+    yielded_elements
 }
 
 fn handle_zero_length_slice(
@@ -497,7 +521,6 @@ fn handle_zero_length_slice(
                 ))
             }
 
-            //TODO: TemplateLoop
             segments.push(Token::template_loop_token(
                 pos_marker.clone(),
                 Some(block_stack.top()),

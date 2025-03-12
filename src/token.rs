@@ -469,11 +469,13 @@ impl Token {
     }
 
     pub fn first_non_whitespace_segment_raw_upper(&self) -> Option<String> {
-        self.raw_segments()
-            .iter()
-            .filter(|x| !x.raw_upper().trim().is_empty())
-            .next()
-            .map(|y| y.raw_upper())
+        self.raw_segments().iter().find_map(|seg| {
+            if !seg.raw_upper().trim().is_empty() {
+                Some(seg.raw_upper().clone())
+            } else {
+                None
+            }
+        })
     }
 
     pub fn class_is_type(&self, seg_types: &[&str]) -> bool {
@@ -501,15 +503,19 @@ impl Token {
     }
 
     pub fn is_code(&self) -> bool {
-        match self.segments.len() {
-            0 => self.is_code,
-            1.. => self.segments.iter().any(|s| s.is_code()),
+        match self.is_raw() {
+            true => self.is_code,
+            false => self.segments.iter().any(|s| s.is_code()),
         }
     }
 
     pub fn is_templated(&self) -> bool {
         let pos_marker = self.pos_marker.clone().expect("PositionMarker must be set");
         pos_marker.source_slice.start != pos_marker.source_slice.stop && !pos_marker.is_literal()
+    }
+
+    pub fn block_type(&self) -> Option<String> {
+        self.block_type.clone()
     }
 
     fn code_indices(&self) -> Vec<usize> {
@@ -1087,6 +1093,11 @@ pub mod python {
         #[getter]
         pub fn is_meta(&self) -> bool {
             self.0.is_meta
+        }
+
+        #[getter]
+        pub fn block_type(&self) -> Option<String> {
+            self.0.block_type()
         }
 
         #[pyo3(signature = (raw_only = false))]

@@ -491,15 +491,13 @@ pub mod python {
         }
 
         #[getter]
-        fn sliced_file(&self) -> PyResult<Vec<PyTemplatedFileSlice>> {
-            let slices = self.utf8_to_unicode_slices();
-            Ok(slices)
+        fn sliced_file(&self) -> Vec<PyTemplatedFileSlice> {
+            self.utf8_to_unicode_slices()
         }
 
         #[getter]
-        fn raw_sliced(&self) -> PyResult<Vec<PyRawFileSlice>> {
-            let slices = self.raw_slices_to_py();
-            Ok(slices)
+        fn raw_sliced(&self) -> Vec<PyRawFileSlice> {
+            self.raw_slices_to_py()
         }
 
         #[getter("_source_newlines")]
@@ -542,43 +540,45 @@ pub mod python {
         }
 
         fn utf8_to_unicode_slices(&self) -> Vec<PyTemplatedFileSlice> {
-            let mut char_source_str = self.0.source_str.char_indices().map(|(i, _)| i).enumerate();
-            let mut char_templated_str = self
+            let char_source_vec = self
+                .0
+                .source_str
+                .char_indices()
+                .map(|(i, _)| i)
+                .collect::<Vec<_>>();
+            let char_templated_vec = self
                 .0
                 .templated_str
                 .char_indices()
                 .map(|(i, _)| i)
-                .enumerate();
-            let mut source_idx = 0;
-            let mut templated_idx = 0;
+                .collect::<Vec<_>>();
 
             self.0
                 .sliced_file
                 .iter()
                 .map(|slice| {
-                    let mut new_slice = slice.clone();
+                    let mut new_slice = PyTemplatedFileSlice(slice.clone()); // Wrap TemplatedFileSlice in PyTemplatedFileSlice
 
-                    new_slice.source_slice.start = char_source_str
-                        .find(|&(_, ci)| ci == slice.source_slice.start)
-                        .map(|(i, _)| i)
-                        .unwrap_or(source_idx);
-                    new_slice.source_slice.stop = char_source_str
-                        .find(|&(_, ci)| ci == slice.source_slice.stop)
-                        .map(|(i, _)| i)
-                        .unwrap_or(self.0.source_str.chars().count());
-                    source_idx = new_slice.source_slice.stop;
+                    new_slice.0.source_slice.start = char_source_vec
+                        .iter()
+                        .position(|&c| c == new_slice.0.source_slice.start)
+                        .unwrap_or(char_source_vec.len());
+                    new_slice.0.source_slice.stop = char_source_vec
+                        .iter()
+                        .position(|&c| c == new_slice.0.source_slice.stop)
+                        .unwrap_or(char_source_vec.len());
+                    new_slice.0.templated_slice.start = char_templated_vec
+                        .iter()
+                        .position(|&c| c == new_slice.0.templated_slice.start)
+                        .unwrap_or(char_templated_vec.len());
+                    new_slice.0.templated_slice.stop = char_templated_vec
+                        .iter()
+                        .position(|&c| c == new_slice.0.templated_slice.stop)
+                        .unwrap_or(char_templated_vec.len());
 
-                    new_slice.templated_slice.start = char_templated_str
-                        .find(|&(_, ci)| ci == slice.templated_slice.start)
-                        .map(|(i, _)| i)
-                        .unwrap_or(templated_idx);
-                    new_slice.templated_slice.stop = char_templated_str
-                        .find(|&(_, ci)| ci == slice.templated_slice.stop)
-                        .map(|(i, _)| i)
-                        .unwrap_or(self.0.templated_str.chars().count());
-                    templated_idx = new_slice.templated_slice.stop;
+                    println!("{:?}::{:?}", new_slice.0.source_slice, new_slice.0.templated_slice);
 
-                    PyTemplatedFileSlice(new_slice)
+                    new_slice
                 })
                 .collect()
         }
@@ -665,35 +665,32 @@ pub mod python {
             {
                 return sliced_file.iter().map(|ts| ts.0.clone()).collect();
             }
-            let mut char_source_str = source_str.char_indices().enumerate();
-            let mut char_templated_str = templated_str.char_indices().enumerate();
-            let mut source_idx = 0;
-            let mut templated_idx = 0;
+            let char_source_vec = source_str.char_indices().enumerate().collect::<Vec<_>>();
+            let char_templated_vec = templated_str.char_indices().enumerate().collect::<Vec<_>>();
 
             sliced_file
                 .iter()
                 .map(|py_slice| {
                     let mut new_slice = py_slice.0.clone(); // Extract TemplatedFileSlice and clone it
 
-                    new_slice.source_slice.start = char_source_str
-                        .find(|&(i, _ci)| i == new_slice.source_slice.start)
-                        .map(|(_i, (ci, _c))| ci)
-                        .unwrap_or(source_idx);
-                    new_slice.source_slice.stop = char_source_str
-                        .find(|&(i, _ci)| i == new_slice.source_slice.stop)
-                        .map(|(_i, (ci, _c))| ci)
-                        .unwrap_or(source_str.len());
-                    source_idx = new_slice.source_slice.stop;
+                    new_slice.source_slice.start = char_source_vec
+                        .get(new_slice.source_slice.start)
+                        .map(|c| c.0)
+                        .unwrap_or_else(|| char_source_vec.len());
+                    new_slice.source_slice.stop = char_source_vec
+                        .get(new_slice.source_slice.stop)
+                        .map(|c| c.0)
+                        .unwrap_or_else(|| char_source_vec.len());
+                    new_slice.templated_slice.start = char_templated_vec
+                        .get(new_slice.templated_slice.start)
+                        .map(|c| c.0)
+                        .unwrap_or_else(|| char_templated_vec.len());
+                    new_slice.templated_slice.stop = char_templated_vec
+                        .get(new_slice.templated_slice.stop)
+                        .map(|c| c.0)
+                        .unwrap_or_else(|| char_templated_vec.len());
 
-                    new_slice.templated_slice.start = char_templated_str
-                        .find(|&(i, _ci)| i == new_slice.templated_slice.start)
-                        .map(|(_i, (ci, _c))| ci)
-                        .unwrap_or(templated_idx);
-                    new_slice.templated_slice.stop = char_templated_str
-                        .find(|&(i, _ci)| i == new_slice.templated_slice.stop)
-                        .map(|(_i, (ci, _c))| ci)
-                        .unwrap_or(templated_str.len());
-                    templated_idx = new_slice.templated_slice.stop;
+                    println!("{:?}", new_slice);
 
                     new_slice
                 })

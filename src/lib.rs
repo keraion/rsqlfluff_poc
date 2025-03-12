@@ -21,6 +21,10 @@ use token::python::PyToken;
 /// A Python module implemented in Rust.
 #[pymodule(name = "rsqlfluff")]
 fn rsqlfluff(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let env = env_logger::Env::default().filter_or("RUST_LOG", "warn");
+    env_logger::Builder::from_env(env)
+        .try_init()
+        .unwrap_or_else(|_| log::warn!("env_logger already initialized!"));
     m.add_class::<PyToken>()?;
     m.add_class::<PyTemplatedFile>()?;
     m.add_class::<PyTemplatedFileSlice>()?;

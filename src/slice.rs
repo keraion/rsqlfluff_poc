@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{fmt::Display, ops::Range};
 
 #[derive(Debug, PartialEq, Hash, Eq, Clone, Copy)]
 pub struct Slice {
@@ -26,6 +26,12 @@ impl Slice {
 
     pub fn len(&self) -> usize {
         self.stop - self.start
+    }
+}
+
+impl Display for Slice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "slice({}, {}, None)", self.start, self.stop)
     }
 }
 
