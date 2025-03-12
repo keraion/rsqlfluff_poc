@@ -27,7 +27,7 @@ impl Token {
             is_whitespace: false,
             is_code: true,
             is_comment: false,
-            default_raw: "".to_string(),
+            _default_raw: "".to_string(),
             indent_value: 0,
             is_templated: false,
             block_uuid: None,
@@ -184,7 +184,7 @@ impl Token {
             is_whitespace: true,
             is_code: false,
             is_comment: false,
-            default_raw: " ".to_string(),
+            _default_raw: " ".to_string(),
             ..Self::raw_token(raw, pos_marker, class_types, trim_start, trim_chars)
         }
     }
@@ -202,7 +202,7 @@ impl Token {
             is_whitespace: true,
             is_code: false,
             is_comment: false,
-            default_raw: "\n".to_string(),
+            _default_raw: "\n".to_string(),
             ..Self::raw_token(raw, pos_marker, class_types, trim_start, trim_chars)
         }
     }

@@ -35,7 +35,7 @@ pub struct Token {
     is_whitespace: bool,
     is_code: bool,
     is_comment: bool,
-    default_raw: String,
+    _default_raw: String,
     pub indent_value: i32,
     pub is_templated: bool,
     pub block_uuid: Option<Uuid>,
@@ -53,6 +53,22 @@ pub struct Token {
 }
 
 impl Token {
+    fn comments(&self) -> Vec<Token> {
+        self.segments
+            .clone()
+            .into_iter()
+            .filter(|s| s.is_type(&["comment"]))
+            .collect::<Vec<_>>()
+    }
+
+    fn non_comments(&self) -> Vec<Token> {
+        self.segments
+            .clone()
+            .into_iter()
+            .filter(|s| !s.is_type(&["comment"]))
+            .collect::<Vec<_>>()
+    }
+
     /// Returns True if this segment is code.
     pub fn is_code(&self) -> bool {
         match self.is_raw() {
@@ -61,19 +77,61 @@ impl Token {
         }
     }
 
-    pub fn raw_segments(&self) -> Vec<Token> {
-        match self.segments.len() {
-            1.. => self
-                .segments
-                .iter()
-                .flat_map(|s| s.raw_segments())
-                .collect::<Vec<_>>(),
-            0 => vec![self.clone()],
+    fn code_indices(&self) -> Vec<usize> {
+        self.segments
+            .iter()
+            .enumerate()
+            .filter(|(_i, s)| s.is_code())
+            .map(|(i, _s)| i)
+            .collect()
+    }
+
+    pub fn is_comment(&self) -> bool {
+        match self.is_raw() {
+            true => self.is_comment,
+            false => self.segments.iter().all(|s| s.is_comment()),
         }
+    }
+
+    pub fn is_whitespace(&self) -> bool {
+        match self.is_raw() {
+            true => self.is_whitespace,
+            false => self.segments.iter().all(|s| s.is_whitespace()),
+        }
+    }
+
+    pub fn raw(&self) -> String {
+        self.raw.clone()
     }
 
     pub fn raw_upper(&self) -> String {
         self.raw.to_uppercase()
+    }
+
+    pub fn raw_segments(&self) -> Vec<Token> {
+        match self.is_raw() {
+            true => vec![self.clone()],
+            false => self
+                .segments
+                .iter()
+                .flat_map(|s| s.raw_segments())
+                .collect::<Vec<_>>(),
+        }
+    }
+
+    pub fn class_types(&self) -> HashSet<String> {
+        self.class_types.clone()
+    }
+
+    pub fn source_fixes(&self) -> Vec<SourceFix> {
+        match self.is_raw() {
+            true => self.source_fixes.clone().unwrap_or_default(),
+            false => self
+                .segments
+                .iter()
+                .flat_map(|s| s.source_fixes())
+                .collect(),
+        }
     }
 
     pub fn raw_trimmed(&self) -> String {
@@ -164,15 +222,6 @@ impl Token {
 
     pub fn block_type(&self) -> Option<String> {
         self.block_type.clone()
-    }
-
-    fn code_indices(&self) -> Vec<usize> {
-        self.segments
-            .iter()
-            .enumerate()
-            .filter(|(_i, s)| s.is_code())
-            .map(|(i, _s)| i)
-            .collect()
     }
 
     pub fn recursive_crawl(
@@ -318,17 +367,6 @@ impl Token {
             .working_loc_after(&self.raw)
     }
 
-    pub fn source_fixes(&self) -> Vec<SourceFix> {
-        match self.is_raw() {
-            true => self.source_fixes.clone().unwrap_or_default(),
-            false => self
-                .segments
-                .iter()
-                .flat_map(|s| s.source_fixes())
-                .collect(),
-        }
-    }
-
     pub fn recursive_crawl_all(&self, reverse: bool) -> Box<dyn Iterator<Item = &Token> + '_> {
         if reverse {
             Box::new(
@@ -359,22 +397,6 @@ impl Token {
                     .collect::<HashSet<String>>()
             })
             .collect::<HashSet<String>>()
-    }
-
-    fn comments(&self) -> Vec<Token> {
-        self.segments
-            .clone()
-            .into_iter()
-            .filter(|s| s.is_type(&["comment"]))
-            .collect::<Vec<_>>()
-    }
-
-    fn non_comments(&self) -> Vec<Token> {
-        self.segments
-            .clone()
-            .into_iter()
-            .filter(|s| !s.is_type(&["comment"]))
-            .collect::<Vec<_>>()
     }
 
     fn preface(&self, ident: usize, tabsize: usize) -> String {

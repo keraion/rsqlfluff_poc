@@ -317,15 +317,10 @@ impl PyToken {
 
     // pub fn set_parent<'py>(&mut self, parent: Bound<'py, PyAny>, idx: i32) {
     pub fn set_parent<'py>(&self, parent: Bound<'py, PyAny>, idx: usize) {
-        // parent
-        let token_type = parent.getattr("type").expect("no type");
-        let raw = parent.getattr("raw").expect("no raw");
-        // println!("{}: {}", token_type, raw);
         let parent_token: Token = parent
             .extract::<PySqlFluffToken>()
             .map(Into::into)
             .expect("bad parent");
-        // println!("{:?}", parent_token);
         self.0
             .clone()
             .set_parent(Arc::new(parent_token.clone()), idx);
@@ -357,6 +352,7 @@ impl PyToken {
         )
     }
 
+    #[pyo3(signature = (code_only=None, show_raw=None, include_meta=None))]
     pub fn to_tuple<'py>(
         &self,
         py: Python<'py>,
@@ -367,6 +363,7 @@ impl PyToken {
         PyTupleSerialisedSegment(self.0.to_tuple(code_only, show_raw, include_meta)).to_py_tuple(py)
     }
 
+    #[pyo3(signature = (segments=None, parent=None, parent_idx=None))]
     pub fn copy(
         &self,
         segments: Option<Vec<PySqlFluffToken>>,
