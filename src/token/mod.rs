@@ -3,6 +3,7 @@ mod eq;
 pub mod fix;
 mod fmt;
 pub mod path;
+#[cfg(feature = "python")]
 pub mod python;
 
 use std::{
@@ -25,7 +26,7 @@ pub enum TupleSerialisedSegment {
 
 #[derive(Debug, Clone)]
 pub struct Token {
-    pub token_type: Option<String>,
+    pub token_type: String,
     pub class_types: HashSet<String>,
     pub comment_separate: bool,
     pub is_meta: bool,
@@ -50,6 +51,7 @@ pub struct Token {
     pub source_fixes: Option<Vec<SourceFix>>,
     pub trim_start: Option<Vec<String>>,
     pub trim_chars: Option<Vec<String>>,
+    pub cache_key: String,
 }
 
 impl Token {
@@ -123,6 +125,29 @@ impl Token {
         self.class_types.clone()
     }
 
+    pub fn descendant_type_set(&self) -> HashSet<String> {
+        self.segments
+            .iter()
+            .flat_map(|seg| {
+                seg.descendant_type_set()
+                    .union(&seg.class_types())
+                    .cloned()
+                    .collect::<HashSet<String>>()
+            })
+            .collect::<HashSet<String>>()
+    }
+
+    pub fn direct_descendant_type_set(&self) -> HashSet<String> {
+        self.segments
+            .iter()
+            .flat_map(|seg| seg.class_types())
+            .collect::<HashSet<String>>()
+    }
+
+    pub fn raw_segments_with_ancestors(&self) -> Vec<(Token, Vec<PathStep>)> {
+        todo!()
+    }
+
     pub fn source_fixes(&self) -> Vec<SourceFix> {
         match self.is_raw() {
             true => self.source_fixes.clone().unwrap_or_default(),
@@ -132,6 +157,33 @@ impl Token {
                 .flat_map(|s| s.source_fixes())
                 .collect(),
         }
+    }
+
+    pub fn first_non_whitespace_segment_raw_upper(&self) -> Option<String> {
+        self.raw_segments().iter().find_map(|seg| {
+            if !seg.raw_upper().trim().is_empty() {
+                Some(seg.raw_upper().clone())
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn is_templated(&self) -> bool {
+        let pos_marker = self.pos_marker.clone().expect("PositionMarker must be set");
+        pos_marker.source_slice.start != pos_marker.source_slice.stop && !pos_marker.is_literal()
+    }
+
+    pub fn get_type(&self) -> String {
+        self.token_type.clone()
+    }
+
+    pub fn is_type(&self, seg_types: &[&str]) -> bool {
+        self.class_is_type(seg_types)
+    }
+
+    pub fn get_raw_segments(&self) -> Vec<Token> {
+        todo!()
     }
 
     pub fn raw_trimmed(&self) -> String {
@@ -161,8 +213,54 @@ impl Token {
         raw_buff
     }
 
-    pub fn get_type(&self) -> String {
-        self.token_type.clone().expect("Token has no type")
+    fn _raw_normalized(&self) -> String {
+        todo!()
+    }
+
+    pub fn raw_normalized(&self) -> String {
+        todo!()
+    }
+
+    pub fn stringify(&self, ident: usize, tabsize: usize, code_only: bool) -> String {
+        let mut buff = String::new();
+        let preface = self.preface(ident, tabsize);
+        writeln!(buff, "{}", preface).unwrap();
+
+        if !code_only && self.comment_separate && !self.comments().is_empty() {
+            if !self.comments().is_empty() {
+                writeln!(buff, "{}Comments:", " ".repeat((ident + 1) * tabsize)).unwrap();
+                for seg in &self.comments() {
+                    let segment_string = seg.stringify(ident + 2, tabsize, code_only);
+                    buff.push_str(&segment_string);
+                }
+            }
+
+            if !self.non_comments().is_empty() {
+                writeln!(buff, "{}Code:", " ".repeat((ident + 1) * tabsize)).unwrap();
+                for seg in &self.non_comments() {
+                    let segment_string = seg.stringify(ident + 2, tabsize, code_only);
+                    buff.push_str(&segment_string);
+                }
+            }
+        } else {
+            for seg in &self.segments {
+                if !code_only || seg.is_code {
+                    let segment_string = seg.stringify(ident + 1, tabsize, code_only);
+                    buff.push_str(&segment_string);
+                }
+            }
+        }
+
+        buff
+    }
+
+    pub fn edit(&self, raw: Option<String>, source_fixes: Option<Vec<SourceFix>>) -> Self {
+        Self {
+            raw: raw.unwrap_or(self.raw.clone()),
+            source_fixes: Some(source_fixes.unwrap_or(self.source_fixes())),
+            uuid: Uuid::new_v4().as_u128(),
+            ..self.clone()
+        }
     }
 
     pub fn _get_raw_segment_kwargs(&self) -> HashMap<String, String> {
@@ -176,19 +274,9 @@ impl Token {
             .collect()
     }
 
-    pub fn set_parent(mut self, parent: Arc<Token>, idx: usize) {
+    pub fn set_parent(&mut self, parent: Arc<Token>, idx: usize) {
         self.parent = Some(Arc::downgrade(&parent));
         self.parent_idx = Some(idx);
-    }
-
-    pub fn first_non_whitespace_segment_raw_upper(&self) -> Option<String> {
-        self.raw_segments().iter().find_map(|seg| {
-            if !seg.raw_upper().trim().is_empty() {
-                Some(seg.raw_upper().clone())
-            } else {
-                None
-            }
-        })
     }
 
     pub fn class_is_type(&self, seg_types: &[&str]) -> bool {
@@ -207,17 +295,8 @@ impl Token {
         }
     }
 
-    pub fn is_type(&self, seg_types: &[&str]) -> bool {
-        self.class_is_type(seg_types)
-    }
-
     pub fn is_raw(&self) -> bool {
         self.segments.len() == 0
-    }
-
-    pub fn is_templated(&self) -> bool {
-        let pos_marker = self.pos_marker.clone().expect("PositionMarker must be set");
-        pos_marker.source_slice.start != pos_marker.source_slice.stop && !pos_marker.is_literal()
     }
 
     pub fn block_type(&self) -> Option<String> {
@@ -253,7 +332,7 @@ impl Token {
 
         // Recursively process child segments
         for seg in &self.segments {
-            if !no_recursive_set.contains(seg.token_type.as_deref().unwrap_or("")) {
+            if !no_recursive_set.contains(seg.token_type.as_str()) {
                 results.extend(seg.recursive_crawl(
                     seg_types,
                     recurse_into,
@@ -387,18 +466,6 @@ impl Token {
         }
     }
 
-    pub fn descendant_type_set(&self) -> HashSet<String> {
-        self.segments
-            .iter()
-            .flat_map(|seg| {
-                seg.descendant_type_set()
-                    .union(&seg.class_types)
-                    .cloned()
-                    .collect::<HashSet<String>>()
-            })
-            .collect::<HashSet<String>>()
-    }
-
     fn preface(&self, ident: usize, tabsize: usize) -> String {
         let padding = " ".repeat(ident * tabsize);
         let padded_type = format!("{}{}{}:", padding, self.preface_modifier, self.get_type());
@@ -416,39 +483,6 @@ impl Token {
         );
 
         preface.trim_end().to_string()
-    }
-
-    pub fn stringify(&self, ident: usize, tabsize: usize, code_only: bool) -> String {
-        let mut buff = String::new();
-        let preface = self.preface(ident, tabsize);
-        writeln!(buff, "{}", preface).unwrap();
-
-        if !code_only && self.comment_separate && !self.comments().is_empty() {
-            if !self.comments().is_empty() {
-                writeln!(buff, "{}Comments:", " ".repeat((ident + 1) * tabsize)).unwrap();
-                for seg in &self.comments() {
-                    let segment_string = seg.stringify(ident + 2, tabsize, code_only);
-                    buff.push_str(&segment_string);
-                }
-            }
-
-            if !self.non_comments().is_empty() {
-                writeln!(buff, "{}Code:", " ".repeat((ident + 1) * tabsize)).unwrap();
-                for seg in &self.non_comments() {
-                    let segment_string = seg.stringify(ident + 2, tabsize, code_only);
-                    buff.push_str(&segment_string);
-                }
-            }
-        } else {
-            for seg in &self.segments {
-                if !code_only || seg.is_code {
-                    let segment_string = seg.stringify(ident + 1, tabsize, code_only);
-                    buff.push_str(&segment_string);
-                }
-            }
-        }
-
-        buff
     }
 
     pub fn to_tuple(
@@ -510,14 +544,6 @@ impl Token {
         }
 
         new_segment
-    }
-
-    pub fn edit(&self, raw: Option<String>, source_fixes: Option<Vec<SourceFix>>) -> Self {
-        Self {
-            raw: raw.unwrap_or(self.raw.clone()),
-            source_fixes: Some(source_fixes.unwrap_or(self.source_fixes())),
-            ..self.clone()
-        }
     }
 
     pub fn position_segments(segments: &[Token], parent_pos: PositionMarker) -> Vec<Token> {
@@ -586,5 +612,138 @@ impl Token {
         }
 
         segment_buffer
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::dialect::matcher::ANSI_LEXERS;
+    use crate::matcher::TokenGenerator;
+    use crate::slice::Slice;
+    use crate::templater::templatefile::TemplatedFile;
+
+    use super::*;
+
+    /// Roughly generate test segments.
+    ///
+    /// This function isn't totally robust, but good enough
+    /// for testing. Use with caution.
+    fn generate_test_segments(elems: &[&str]) -> Vec<Token> {
+        let mut buff = vec![];
+        let templated_file = Arc::new(TemplatedFile::from(
+            elems.iter().cloned().collect::<String>(),
+        ));
+        let mut idx = 0;
+
+        for elem in elems {
+            let elem = &**elem;
+            if elem == "<indent>" {
+                buff.push(Token::indent_token(
+                    PositionMarker::from_point(idx, idx, &templated_file, None, None),
+                    false,
+                    None,
+                    HashSet::new(),
+                    None,
+                ));
+                continue;
+            } else if elem == "<dedent>" {
+                buff.push(Token::dedent_token(
+                    PositionMarker::from_point(idx, idx, &templated_file, None, None),
+                    false,
+                    None,
+                    HashSet::new(),
+                ));
+                continue;
+            }
+            let (token_fn, instance_types, cache_key): (TokenGenerator, HashSet<String>, String) =
+                match elem {
+                    " " | "\t" => (
+                        Token::whitespace_token,
+                        HashSet::new(),
+                        Uuid::new_v4().to_string(),
+                    ),
+                    "\n" => (
+                        Token::newline_token,
+                        HashSet::new(),
+                        Uuid::new_v4().to_string(),
+                    ),
+                    "(" => (
+                        Token::symbol_token,
+                        HashSet::from_iter(["start_bracket".to_string()]),
+                        Uuid::new_v4().to_string(),
+                    ),
+                    ")" => (
+                        Token::symbol_token,
+                        HashSet::from_iter(["end_bracket".to_string()]),
+                        Uuid::new_v4().to_string(),
+                    ),
+                    "[" => (
+                        Token::symbol_token,
+                        HashSet::from_iter(["start_square_bracket".to_string()]),
+                        Uuid::new_v4().to_string(),
+                    ),
+                    "]" => (
+                        Token::symbol_token,
+                        HashSet::from_iter(["end_square_bracket".to_string()]),
+                        Uuid::new_v4().to_string(),
+                    ),
+                    s if s.starts_with("--") => (
+                        Token::comment_token,
+                        HashSet::from_iter(["inline_comment".to_string()]),
+                        Uuid::new_v4().to_string(),
+                    ),
+                    s if s.starts_with("\"") => (
+                        Token::code_token,
+                        HashSet::from_iter(["double_quote".to_string()]),
+                        Uuid::new_v4().to_string(),
+                    ),
+                    s if s.starts_with("'") => (
+                        Token::code_token,
+                        HashSet::from_iter(["single_quote".to_string()]),
+                        Uuid::new_v4().to_string(),
+                    ),
+                    _ => (
+                        Token::code_token,
+                        HashSet::new(),
+                        Uuid::new_v4().to_string(),
+                    ),
+                };
+
+            buff.push(token_fn(
+                elem.into(),
+                PositionMarker::new(
+                    Slice {
+                        start: idx,
+                        stop: idx + elem.len(),
+                    },
+                    Slice {
+                        start: idx,
+                        stop: idx + elem.len(),
+                    },
+                    &templated_file,
+                    None,
+                    None,
+                ),
+                instance_types,
+                None,
+                None,
+                cache_key,
+            ));
+            idx += elem.len();
+        }
+
+        buff
+    }
+
+    fn raw_segments() -> Vec<Token> {
+        generate_test_segments(&vec!["foobar", ".barfoo"])
+    }
+
+    #[test]
+    /// Test niche case of calling get_raw_segments on a raw segment.
+    fn test_parser_raw_get_raw_segments() {
+        for s in raw_segments() {
+            assert_eq!(s.raw_segments(), [s]);
+        }
     }
 }

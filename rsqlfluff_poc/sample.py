@@ -31,23 +31,35 @@ def run_lexer(
     if print_results:
         print(f"{name},{dialect},{file},{sql_len},{py_dur},{rs_dur},{(py_dur) / (rs_dur)}")
     for i, (p, r) in enumerate(zip(py_out[0], rs_out[0])):
+        # print(r)
+        # print(f"{p}, {p._cache_key}")
         if p.raw != r.raw:
             print(f"{file}: {p.raw} != {r.raw}")
             break
 
 
-# print("name,dialect,file,sql_len,py_dur,rs_dur,py_dur/rs_dur")
+# print("name,dialect,file,sql_len,py_dur,rs_dur,speedup")
 
 # Load all the dialects before measuring, don't print the output here
 for dialect in dialect_readout():
+    # if dialect.label != "databricks":
+    #     continue
     sql_all = ""
     for file in glob.glob(f"../sqlfluff/test/fixtures/dialects/{dialect.label}/*.sql"):
+    # for file in glob.glob(f"/home/kerai/repos/sqlfluff/test/fixtures/dialects/databricks/show_views.sql"):
         if "obevo" in file:
             continue
         with open(file, "r", encoding="utf8") as fh:
             sql_all += fh.read()
         break
     run_lexer("all_py_str", dialect.label, sql_all, "all", False)
+    # tf = TemplatedFile.from_string(sql_all)
+    # run_lexer("all_py_tf", dialect.label, tf, "all")
+    # tf = rsqlfluff.TemplatedFile.from_string(sql_all)
+    # run_lexer("all_rust_tf", dialect.label, tf, "all")
+    # break
+
+# exit()
 
 # Run large files from python string
 for dialect in dialect_readout():

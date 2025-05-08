@@ -51,6 +51,7 @@ pub fn get_lexers(dialect: Dialect) -> &'static Vec<LexMatcher> {{
 
 def generate_lexers():
     print("use once_cell::sync::Lazy;")
+    print("use uuid::Uuid;")
     print("use crate::matcher::{LexMatcher, extract_nested_block_comment};")
     print("use std::str::FromStr;")
     print("use crate::token::Token;")
@@ -143,6 +144,7 @@ def _as_rust_lexer_matcher(lexer_matcher: LexerType, dialect: str, is_subdivide=
         {trim_post_subdivide},
         {trim_start},
         {trim_chars},
+        Uuid::new_v4().to_string(),
         {fallback}
         {is_match_valid}
     )"""

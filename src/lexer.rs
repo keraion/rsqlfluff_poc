@@ -174,6 +174,7 @@ impl Lexer {
                 None,
                 None,
                 None,
+                "0".to_string(),
                 None,
                 |_| true,
             )
@@ -306,7 +307,7 @@ impl Lexer {
     fn violations_from_tokens(tokens: &[Token]) -> Vec<SQLLexError> {
         tokens
             .iter()
-            .filter(|t| t.token_type.as_ref().is_some_and(|tt| tt == "unlexable"))
+            .filter(|t| t.token_type == "unlexable")
             .map(|token| {
                 SQLLexError::new(
                     format!(
@@ -533,6 +534,7 @@ fn handle_zero_length_slice(
                     true,
                     None,
                     HashSet::new(),
+                    None,
                 ))
             }
             return segments.into_iter();
@@ -588,6 +590,7 @@ fn handle_zero_length_slice(
                 true,
                 Some(block_stack.top()),
                 HashSet::new(),
+                None,
             ));
         }
 
@@ -642,6 +645,7 @@ pub enum LexInput {
     TemplatedFile(Arc<TemplatedFile>),
 }
 
+#[cfg(feature = "python")]
 pub mod python {
     use std::str::FromStr;
 

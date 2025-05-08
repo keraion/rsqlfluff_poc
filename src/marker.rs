@@ -56,12 +56,12 @@ impl PositionMarker {
         // Example implementation: move forward by the length of the string
         let lines: Vec<&str> = raw.split('\n').collect();
         if lines.len() > 1 {
-            (
-                line_no + lines.len() - 1,
-                lines.last().unwrap().len() + 1,
-            )
+            let num_lines: usize = lines.len().try_into().unwrap();
+            let last_line_len: usize = lines.last().unwrap().len().try_into().unwrap();
+            (line_no + num_lines - 1, last_line_len + 1)
         } else {
-            (line_no, line_pos + raw.len())
+            let first_line_len: usize = raw.len().try_into().unwrap();
+            (line_no, line_pos + first_line_len)
         }
     }
 
@@ -126,7 +126,9 @@ impl PositionMarker {
     }
 
     pub fn source_str(&self) -> String {
-        self.templated_file.source_str[self.source_slice.start..self.source_slice.stop].to_owned()
+        self.templated_file.source_str[self.source_slice.start.try_into().unwrap()
+            ..self.source_slice.stop.try_into().unwrap()]
+            .to_owned()
     }
 
     pub fn to_source_dict(&self) -> HashMap<String, usize> {
@@ -167,47 +169,37 @@ impl PositionMarker {
         )
     }
 
-    pub fn from_child_markers(markers: &[Option<&PositionMarker>]) -> Self {
-        let valid_markers: Vec<&PositionMarker> = markers.iter().filter_map(|m| *m).collect();
+    pub fn from_child_markers(markers: &[Option<PositionMarker>]) -> Self {
+        let mut source_start = usize::MAX;
+        let mut source_stop = usize::MIN;
+        let mut templated_start = usize::MAX;
+        let mut templated_stop = usize::MIN;
 
-        if valid_markers.is_empty() {
-            panic!("No valid markers provided.");
+        let mut templated_file = None;
+
+        for marker in markers.iter().filter_map(|m| m.as_ref()) {
+            source_start = source_start.min(marker.source_slice.start);
+            source_stop = source_stop.max(marker.source_slice.stop);
+            templated_start = templated_start.min(marker.templated_slice.start);
+            templated_stop = templated_stop.max(marker.templated_slice.stop);
+
+            if templated_file.is_none() {
+                templated_file = Some(marker.templated_file.clone());
+            }
+            if templated_file.as_ref() != Some(&marker.templated_file) {
+                panic!("Markers must refer to the same templated file.");
+            }
         }
 
-        let source_slice = Slice::from(
-            valid_markers
-                .iter()
-                .map(|m| m.source_slice.start)
-                .min()
-                .unwrap()
-                ..valid_markers
-                    .iter()
-                    .map(|m| m.source_slice.stop)
-                    .max()
-                    .unwrap(),
-        );
-
-        let templated_slice = Slice::from(
-            valid_markers
-                .iter()
-                .map(|m| m.templated_slice.start)
-                .min()
-                .unwrap()
-                ..valid_markers
-                    .iter()
-                    .map(|m| m.templated_slice.stop)
-                    .max()
-                    .unwrap(),
-        );
-
-        let templated_file = valid_markers[0].templated_file.clone();
+        let source_slice = Slice::from(source_start..source_stop);
+        let templated_slice = Slice::from(templated_start..templated_stop);
 
         PositionMarker::new(
             source_slice,
             templated_slice,
-            &templated_file,
-            Some(valid_markers[0].working_line_no),
-            Some(valid_markers[0].working_line_pos),
+            &templated_file.unwrap(),
+            None,
+            None,
         )
     }
 }
@@ -242,11 +234,12 @@ pub fn slice_is_point(test_slice: &Slice) -> bool {
     test_slice.start == test_slice.stop
 }
 
+#[cfg(feature = "python")]
 pub mod python {
     use std::{fmt::Display, sync::Arc};
 
     use hashbrown::HashMap;
-    use pyo3::prelude::*;
+    use pyo3::{prelude::*, types::PyType};
 
     use crate::{
         slice::Slice,
@@ -258,7 +251,7 @@ pub mod python {
 
     use super::PositionMarker;
 
-    #[pyclass(name = "PositionMarker", str, eq, ord)]
+    #[pyclass(name = "PositionMarker", str, eq, ord, frozen)]
     #[repr(transparent)]
     #[derive(Debug, Clone)]
     pub struct PyPositionMarker(pub PositionMarker);
@@ -275,9 +268,16 @@ pub mod python {
             self.0.templated_slice.clone()
         }
 
+        // #[getter]
+        // pub fn templated_file(&self) -> PySqlFluffTemplatedFile {
+        //     dbg!("templated file from PositionMarker");
+        //     PySqlFluffTemplatedFile(PyTemplatedFile::from(self.0.templated_file.clone()))
+        // }
+
         #[getter]
-        pub fn templated_file(&self) -> PySqlFluffTemplatedFile {
-            PySqlFluffTemplatedFile(PyTemplatedFile(self.0.templated_file.clone().into()))
+        pub fn templated_file(&self) -> PyTemplatedFile {
+            // dbg!("templated file from PositionMarker");
+            PyTemplatedFile(Arc::clone(&self.0.templated_file))
         }
 
         #[getter]
@@ -295,12 +295,12 @@ pub mod python {
             (self.0.working_line_no, self.0.working_line_pos)
         }
 
-        pub fn start_point_marker(&self) -> PyPositionMarker {
-            PyPositionMarker(self.0.start_point_marker())
+        pub fn start_point_marker(&self) -> Self {
+            Self(self.0.start_point_marker())
         }
 
-        pub fn end_point_marker(&self) -> PyPositionMarker {
-            PyPositionMarker(self.0.end_point_marker())
+        pub fn end_point_marker(&self) -> Self {
+            Self(self.0.end_point_marker())
         }
 
         pub fn source_position(&self) -> (usize, usize) {
@@ -342,6 +342,53 @@ pub mod python {
 
         pub fn to_source_dict(&self) -> HashMap<String, usize> {
             self.0.to_source_dict()
+        }
+
+        #[classmethod]
+        #[pyo3(signature = (markers))]
+        pub fn from_child_markers(
+            _cls: &Bound<'_, PyType>,
+            markers: Vec<Option<PyPositionMarker>>,
+        ) -> PyResult<Self> {
+            let rust_markers: Vec<Option<PositionMarker>> =
+                markers.into_iter().map(|m| m.map(Into::into)).collect();
+            Ok(Self(PositionMarker::from_child_markers(&rust_markers)))
+        }
+
+        #[classmethod]
+        pub fn from_point(
+            _cls: &Bound<'_, PyType>,
+            source_point: usize,
+            templated_point: usize,
+            templated_file: PySqlFluffTemplatedFile,
+            working_line_no: Option<usize>,
+            working_line_pos: Option<usize>,
+        ) -> Self {
+            let templated_file = templated_file.0 .0;
+            Self(PositionMarker::from_point(
+                source_point,
+                templated_point,
+                &templated_file,
+                working_line_no,
+                working_line_pos,
+            ))
+        }
+
+        #[classmethod]
+        pub fn from_points(
+            _cls: &Bound<'_, PyType>,
+            start_marker: &PyPositionMarker,
+            end_marker: &PyPositionMarker,
+        ) -> Self {
+            Self(PositionMarker::from_points(&start_marker.0, &end_marker.0))
+        }
+
+        pub fn is_point(&self) -> bool {
+            self.0.is_point()
+        }
+
+        pub fn to_source_string(&self) -> String {
+            self.0.to_source_string()
         }
     }
 

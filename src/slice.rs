@@ -55,9 +55,9 @@ pub mod python {
         fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
             Ok(PySlice::new(
                 py,
-                isize::try_from(self.start)?,
-                isize::try_from(self.stop)?,
-                isize::try_from(1)?,
+                self.start.try_into()?,
+                self.stop.try_into()?,
+                1,
             ))
         }
     }

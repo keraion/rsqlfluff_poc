@@ -14,6 +14,14 @@ pub struct TemplatedFile {
     pub raw_sliced: Vec<RawFileSlice>,
     source_newlines: Vec<usize>,
     templated_newlines: Vec<usize>,
+    #[cfg(feature = "unicode")]
+    unicode_sliced_file: Vec<TemplatedFileSlice>,
+    #[cfg(feature = "unicode")]
+    unicode_raw_file: Vec<RawFileSlice>,
+    #[cfg(feature = "unicode")]
+    unicode_source_newlines: Vec<usize>,
+    #[cfg(feature = "unicode")]
+    unicode_templated_newlines: Vec<usize>,
 }
 
 impl TemplatedFile {
@@ -112,14 +120,92 @@ impl TemplatedFile {
             }
         }
 
-        TemplatedFile {
-            source_str,
-            fname,
-            templated_str: templated_str_in.to_string(),
-            sliced_file,
-            raw_sliced,
-            source_newlines,
-            templated_newlines,
+        #[cfg(feature = "unicode")]
+        {
+            let unicode_sliced_file = {
+                let char_source_vec = source_str
+                    .char_indices()
+                    .map(|(i, _)| i)
+                    .collect::<Vec<_>>();
+                let char_templated_vec = &templated_str_in
+                    .char_indices()
+                    .map(|(i, _)| i)
+                    .collect::<Vec<_>>();
+
+                sliced_file
+                    .iter()
+                    .map(|slice| {
+                        let mut new_slice = slice.clone();
+
+                        new_slice.source_slice.start = char_source_vec
+                            .iter()
+                            .position(|&c| c == new_slice.source_slice.start)
+                            .unwrap_or(char_source_vec.len());
+                        new_slice.source_slice.stop = char_source_vec
+                            .iter()
+                            .position(|&c| c == new_slice.source_slice.stop)
+                            .unwrap_or(char_source_vec.len());
+                        new_slice.templated_slice.start = char_templated_vec
+                            .iter()
+                            .position(|&c| c == new_slice.templated_slice.start)
+                            .unwrap_or(char_templated_vec.len());
+                        new_slice.templated_slice.stop = char_templated_vec
+                            .iter()
+                            .position(|&c| c == new_slice.templated_slice.stop)
+                            .unwrap_or(char_templated_vec.len());
+
+                        new_slice
+                    })
+                    .collect()
+            };
+            let unicode_raw_file = {
+                if raw_sliced.len() == 1 {
+                    raw_sliced.clone()
+                } else {
+                    log::debug!("running raw utf to unicode conversion step.");
+                    let mut idx = 0;
+                    raw_sliced
+                        .clone()
+                        .iter()
+                        .map(|rs| {
+                            let mut slice = rs.clone();
+                            slice.source_idx = idx;
+                            idx += slice.raw.chars().count();
+                            slice
+                        })
+                        .collect::<Vec<_>>()
+                }
+            };
+            let unicode_source_newlines = iter_codepoint_indices_of_newlines(&source_str).collect();
+            let unicode_templated_newlines =
+                iter_codepoint_indices_of_newlines(&templated_str_in).collect();
+
+            return TemplatedFile {
+                source_str,
+                fname,
+                templated_str: templated_str_in.to_string(),
+                sliced_file,
+                raw_sliced,
+                source_newlines,
+                templated_newlines,
+                unicode_sliced_file,
+                unicode_raw_file,
+                unicode_source_newlines,
+                unicode_templated_newlines,
+            };
+        }
+
+        #[cfg(not(feature = "unicode"))]
+        {
+            TemplatedFile {
+                source_str,
+                fname,
+                templated_str: templated_str_in.to_string(),
+                sliced_file,
+                raw_sliced,
+                source_newlines,
+                templated_newlines,
+            }
         }
     }
 
@@ -293,7 +379,10 @@ impl TemplatedFile {
         let nl_idx = ref_str.binary_search(&char_pos).unwrap_or_else(|x| x);
 
         if nl_idx > 0 {
-            (nl_idx + 1, char_pos - ref_str[nl_idx - 1])
+            (
+                (nl_idx + 1).try_into().unwrap(),
+                char_pos - ref_str[nl_idx - 1],
+            )
         } else {
             (1, char_pos + 1)
         }
@@ -430,8 +519,19 @@ fn iter_indices_of_newlines(raw_str: &str) -> impl Iterator<Item = usize> + '_ {
     raw_str.match_indices('\n').map(|(idx, _)| idx)
 }
 
+#[cfg(feature = "unicode")]
+fn iter_codepoint_indices_of_newlines(raw_str: &str) -> impl Iterator<Item = usize> + '_ {
+    raw_str
+        .char_indices()
+        .filter(|(_i, c)| *c == '\n')
+        .map(|(idx, _)| idx)
+}
+
+#[cfg(feature = "python")]
 pub mod python {
-    use std::sync::Arc;
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    use std::sync::{Arc, Mutex};
+    use std::time::Instant;
 
     use hashbrown::HashMap;
     use pyo3::IntoPyObjectExt;
@@ -444,9 +544,72 @@ pub mod python {
     use crate::templater::fileslice::python::*;
     use crate::templater::fileslice::{RawFileSlice, TemplatedFileSlice};
 
-    use super::{iter_indices_of_newlines, TemplatedFile};
+    use super::TemplatedFile;
+    use once_cell::sync::Lazy;
 
-    #[pyclass(name = "TemplatedFile", frozen, eq, hash)]
+    // fn utf8_to_unicode_slices(tf: &TemplatedFile) -> Vec<PyTemplatedFileSlice> {
+    //     log::debug!("running tf utf to unicode conversion step.");
+    //     let char_source_vec = tf
+    //         .source_str
+    //         .char_indices()
+    //         .map(|(i, _)| i)
+    //         .collect::<Vec<_>>();
+    //     let char_templated_vec = tf
+    //         .templated_str
+    //         .char_indices()
+    //         .map(|(i, _)| i)
+    //         .collect::<Vec<_>>();
+
+    //     tf.sliced_file
+    //         .iter()
+    //         .map(|slice| {
+    //             let mut new_slice = PyTemplatedFileSlice(slice.clone()); // Wrap TemplatedFileSlice in PyTemplatedFileSlice
+
+    //             new_slice.0.source_slice.start = char_source_vec
+    //                 .iter()
+    //                 .position(|&c| c == new_slice.0.source_slice.start)
+    //                 .unwrap_or(char_source_vec.len());
+    //             new_slice.0.source_slice.stop = char_source_vec
+    //                 .iter()
+    //                 .position(|&c| c == new_slice.0.source_slice.stop)
+    //                 .unwrap_or(char_source_vec.len());
+    //             new_slice.0.templated_slice.start = char_templated_vec
+    //                 .iter()
+    //                 .position(|&c| c == new_slice.0.templated_slice.start)
+    //                 .unwrap_or(char_templated_vec.len());
+    //             new_slice.0.templated_slice.stop = char_templated_vec
+    //                 .iter()
+    //                 .position(|&c| c == new_slice.0.templated_slice.stop)
+    //                 .unwrap_or(char_templated_vec.len());
+
+    //             // log::debug!(
+    //             //     "{:?}::{:?}",
+    //             //     new_slice.0.source_slice, new_slice.0.templated_slice
+    //             // );
+
+    //             new_slice
+    //         })
+    //         .collect()
+    // }
+
+    // fn raw_slices_to_py(tf: &TemplatedFile) -> Vec<PyRawFileSlice> {
+    //     log::debug!("running raw utf to unicode conversion step.");
+    //     if tf.raw_sliced.len() == 1 {
+    //         return tf.raw_sliced.clone().into_iter().map(Into::into).collect();
+    //     }
+    //     let mut idx = 0;
+    //     tf.raw_sliced
+    //         .iter()
+    //         .map(|rs| {
+    //             let mut slice = rs.clone();
+    //             slice.source_idx = idx;
+    //             idx += slice.raw.chars().count();
+    //             PyRawFileSlice(slice)
+    //         })
+    //         .collect()
+    // }
+
+    #[pyclass(name = "TemplatedFile", frozen)]
     #[repr(transparent)]
     #[derive(Clone, PartialEq, Hash)]
     pub struct PyTemplatedFile(pub Arc<TemplatedFile>);
@@ -462,18 +625,26 @@ pub mod python {
             sliced_file: Option<Vec<PyTemplatedFileSlice>>,
             raw_sliced: Option<Vec<PyRawFileSlice>>,
         ) -> Self {
-            Self(Arc::new(TemplatedFile::new(
+            log::debug!("PyTemplatedFile::new");
+            let tf = Arc::new(TemplatedFile::new(
                 source_str,
                 fname,
                 templated_str,
                 sliced_file.map(|x| x.into_iter().map(Into::into).collect()),
                 raw_sliced.map(|x| x.into_iter().map(Into::into).collect()),
-            )))
+            ));
+            // let unicode_sliced_file = utf8_to_unicode_slices(&tf);
+            // let unicode_raw_sliced = raw_slices_to_py(&tf);
+            Self(tf)
         }
 
         #[classmethod]
         pub fn from_string(_cls: &Bound<'_, PyType>, raw: String) -> Self {
-            Self(Arc::new(TemplatedFile::from(raw)))
+            log::debug!("PyTemplatedFile::from_string");
+            let tf = Arc::new(TemplatedFile::from(raw));
+            // let unicode_sliced_file = utf8_to_unicode_slices(&tf);
+            // let unicode_raw_sliced = raw_slices_to_py(&tf);
+            Self(tf)
         }
 
         #[getter]
@@ -493,12 +664,22 @@ pub mod python {
 
         #[getter]
         fn sliced_file(&self) -> Vec<PyTemplatedFileSlice> {
-            self.utf8_to_unicode_slices()
+            self.0
+                .unicode_sliced_file
+                .clone()
+                .into_iter()
+                .map(Into::into)
+                .collect()
         }
 
         #[getter]
         fn raw_sliced(&self) -> Vec<PyRawFileSlice> {
-            self.raw_slices_to_py()
+            self.0
+                .unicode_raw_file
+                .clone()
+                .into_iter()
+                .map(Into::into)
+                .collect()
         }
 
         #[getter("_source_newlines")]
@@ -521,6 +702,16 @@ pub mod python {
             Ok(String::from("<TemplatedFile>"))
         }
 
+        fn __eq__(&self, other: &Self) -> bool {
+            self.0 == other.0
+        }
+
+        fn __hash__(&self) -> u64 {
+            let mut hasher = DefaultHasher::new();
+            self.0.hash(&mut hasher);
+            hasher.finish()
+        }
+
         fn get_line_pos_of_char_pos(
             &self,
             char_pos: usize,
@@ -539,53 +730,6 @@ pub mod python {
         ) -> HashMap<String, usize> {
             self.0.source_position_dict_from_slice(&source_slice)
         }
-
-        fn utf8_to_unicode_slices(&self) -> Vec<PyTemplatedFileSlice> {
-            let char_source_vec = self
-                .0
-                .source_str
-                .char_indices()
-                .map(|(i, _)| i)
-                .collect::<Vec<_>>();
-            let char_templated_vec = self
-                .0
-                .templated_str
-                .char_indices()
-                .map(|(i, _)| i)
-                .collect::<Vec<_>>();
-
-            self.0
-                .sliced_file
-                .iter()
-                .map(|slice| {
-                    let mut new_slice = PyTemplatedFileSlice(slice.clone()); // Wrap TemplatedFileSlice in PyTemplatedFileSlice
-
-                    new_slice.0.source_slice.start = char_source_vec
-                        .iter()
-                        .position(|&c| c == new_slice.0.source_slice.start)
-                        .unwrap_or(char_source_vec.len());
-                    new_slice.0.source_slice.stop = char_source_vec
-                        .iter()
-                        .position(|&c| c == new_slice.0.source_slice.stop)
-                        .unwrap_or(char_source_vec.len());
-                    new_slice.0.templated_slice.start = char_templated_vec
-                        .iter()
-                        .position(|&c| c == new_slice.0.templated_slice.start)
-                        .unwrap_or(char_templated_vec.len());
-                    new_slice.0.templated_slice.stop = char_templated_vec
-                        .iter()
-                        .position(|&c| c == new_slice.0.templated_slice.stop)
-                        .unwrap_or(char_templated_vec.len());
-
-                    println!(
-                        "{:?}::{:?}",
-                        new_slice.0.source_slice, new_slice.0.templated_slice
-                    );
-
-                    new_slice
-                })
-                .collect()
-        }
     }
 
     impl PyTemplatedFile {
@@ -596,17 +740,22 @@ pub mod python {
             sliced_file: Vec<TemplatedFileSlice>,
             raw_sliced: Vec<RawFileSlice>,
         ) -> Self {
-            let source_newlines = iter_indices_of_newlines(&source_str).collect();
-            let templated_newlines = iter_indices_of_newlines(&templated_str).collect();
-            Self(Arc::new(TemplatedFile {
+            // let t1 = Instant::now();
+            log::debug!("PyTemplatedFile::from_python: {}", fname);
+            // let source_newlines = iter_indices_of_newlines(&source_str).collect();
+            // let templated_newlines = iter_indices_of_newlines(&templated_str).collect();
+            let tf = Arc::new(TemplatedFile::new(
                 source_str,
                 fname,
-                templated_str,
-                sliced_file,
-                raw_sliced,
-                source_newlines,
-                templated_newlines,
-            }))
+                Some(templated_str),
+                Some(sliced_file),
+                Some(raw_sliced),
+            ));
+            // let unicode_sliced_file = utf8_to_unicode_slices(&tf);
+            // let unicode_raw_sliced = raw_slices_to_py(&tf);
+            // let t2 = t1.elapsed();
+            // log::debug!("PyTemplatedFile::from_python: took {:?}", t2.as_nanos());
+            Self(tf)
         }
 
         fn py_raw_slices(raw_sliced: &[PyRawFileSlice]) -> Vec<RawFileSlice> {
@@ -624,29 +773,6 @@ pub mod python {
                     slice.source_idx = idx;
                     idx += slice.raw.len();
                     slice
-                })
-                .collect()
-        }
-
-        fn raw_slices_to_py(&self) -> Vec<PyRawFileSlice> {
-            if self.0.raw_sliced.len() == 1 {
-                return self
-                    .0
-                    .raw_sliced
-                    .clone()
-                    .into_iter()
-                    .map(Into::into)
-                    .collect();
-            }
-            let mut idx = 0;
-            self.0
-                .raw_sliced
-                .iter()
-                .map(|rs| {
-                    let mut slice = rs.clone();
-                    slice.source_idx = idx;
-                    idx += slice.raw.chars().count();
-                    PyRawFileSlice(slice)
                 })
                 .collect()
         }
@@ -694,7 +820,7 @@ pub mod python {
                         .map(|c| c.0)
                         .unwrap_or_else(|| char_templated_vec.len());
 
-                    println!("{:?}", new_slice);
+                    // log::debug!("{:?}", new_slice);
 
                     new_slice
                 })
@@ -710,18 +836,22 @@ pub mod python {
 
     // impl Into<TemplatedFile> for PyTemplatedFile {
     //     fn into(self) -> TemplatedFile {
-    //         self.0
+    //         self.tf
     //     }
     // }
 
     impl From<Arc<TemplatedFile>> for PyTemplatedFile {
         fn from(value: Arc<TemplatedFile>) -> Self {
+            log::debug!("PyTemplatedFile::from<ArcTemplated> {}", value.fname);
+            // let unicode_sliced_file = utf8_to_unicode_slices(&value);
+            // let unicode_raw_sliced = raw_slices_to_py(&value);
             Self(value)
         }
     }
 
     impl Into<Arc<TemplatedFile>> for PyTemplatedFile {
         fn into(self) -> Arc<TemplatedFile> {
+            log::debug!("PyTemplatedFile::into<ArcTemplated>");
             self.0
         }
     }
@@ -732,27 +862,47 @@ pub mod python {
         type Error = PyErr;
 
         fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
-            PyTemplatedFile(Arc::new(TemplatedFile {
-                source_str: self.0 .0.source_str.clone(),
-                fname: self.0 .0.fname.clone(),
-                templated_str: self.0 .0.templated_str.clone(),
-                sliced_file: self.0 .0.sliced_file.clone(),
-                raw_sliced: self.0 .0.raw_sliced.clone(),
-                source_newlines: self.0 .0.source_newlines.clone(),
-                templated_newlines: self.0 .0.templated_newlines.clone(),
-            }))
-            .into_bound_py_any(py)
+            log::debug!("PySFTemplatedFile::into_py {}", self.0 .0.fname.clone());
+            // let tf = Arc::new(TemplatedFile {
+            //     source_str: self.0.tf.source_str.clone(),
+            //     fname: self.0.tf.fname.clone(),
+            //     templated_str: self.0.tf.templated_str.clone(),
+            //     sliced_file: self.0.tf.sliced_file.clone(),
+            //     raw_sliced: self.0.tf.raw_sliced.clone(),
+            //     source_newlines: self.0.tf.source_newlines.clone(),
+            //     templated_newlines: self.0.tf.templated_newlines.clone(),
+            // });
+            // let unicode_sliced_file = utf8_to_unicode_slices(&tf);
+            // let unicode_raw_sliced = raw_slices_to_py(&tf);
+            // PyTemplatedFile {
+            //     tf: self.0.tf,
+            //     unicode_sliced_file: self.0.unicode_sliced_file,
+            //     unicode_raw_sliced: self.0.raw_sliced(),
+            // }
+            self.0.into_bound_py_any(py)
         }
     }
+
+    static PY_TEMPLATED_FILE_CACHE: Lazy<Mutex<HashMap<String, Arc<TemplatedFile>>>> =
+        Lazy::new(|| Mutex::new(HashMap::new()));
 
     #[derive(Clone)]
     pub struct PySqlFluffTemplatedFile(pub PyTemplatedFile);
 
     impl<'py> FromPyObject<'py> for PySqlFluffTemplatedFile {
         fn extract_bound(obj: &pyo3::Bound<'py, pyo3::PyAny>) -> PyResult<Self> {
+            // let t1 = Instant::now();
             let source_str = obj.getattr("source_str")?.extract::<String>()?;
             let fname = obj.getattr("fname")?.extract::<String>()?;
             let templated_str = obj.getattr("templated_str")?.extract::<String>()?;
+
+            let key = format!("{}:{}:{}", fname, &source_str, &templated_str);
+            let mut cache = PY_TEMPLATED_FILE_CACHE.lock().unwrap();
+
+            if let Some(cached) = cache.get(&key) {
+                return Ok(Self(PyTemplatedFile(cached.clone())));
+            }
+
             let py_sliced_file = obj
                 .getattr("sliced_file")?
                 .extract::<Vec<PySqlFluffTemplatedFileSlice>>()?
@@ -778,7 +928,10 @@ pub mod python {
             //     .getattr("_templated_newlines")?
             //     .extract::<Vec<usize>>()?;
 
-            Ok(Self(
+            // let t2 = t1.elapsed();
+            // log::debug!("PySqlFluffTemplatedFile::extract_bound: {}", t2.as_nanos());
+
+            let tf = Self(
                 PyTemplatedFile::from_python(
                     source_str,
                     fname,
@@ -787,13 +940,16 @@ pub mod python {
                     raw_sliced,
                 )
                 .into(),
-            ))
+            );
+
+            cache.insert(key, tf.0.0.clone());
+            Ok(tf)
         }
     }
 
     impl Into<PyTemplatedFile> for PySqlFluffTemplatedFile {
         fn into(self) -> PyTemplatedFile {
-            PyTemplatedFile(self.0 .0)
+            self.0
         }
     }
 
@@ -848,32 +1004,32 @@ mod tests {
                 ),
             ],
             raw_sliced: vec![
-                RawFileSlice::new("x".repeat(10), "literal".to_string(), 0),
-                RawFileSlice::new("x".repeat(7), "templated".to_string(), 10),
-                RawFileSlice::new("x".repeat(8), "literal".to_string(), 17),
+                RawFileSlice::new("x".repeat(10), "literal".to_string(), 0, None, None),
+                RawFileSlice::new("x".repeat(7), "templated".to_string(), 10, None, None),
+                RawFileSlice::new("x".repeat(8), "literal".to_string(), 17, None, None),
             ],
         }
     }
 
     fn complex_raw_sliced() -> Vec<RawFileSlice> {
         vec![
-            RawFileSlice::new("x".repeat(13), "literal".to_string(), 0),
-            RawFileSlice::new("x".repeat(16), "comment".to_string(), 13),
-            RawFileSlice::new("x".repeat(15), "literal".to_string(), 29),
-            RawFileSlice::new("x".repeat(24), "block_start".to_string(), 44),
-            RawFileSlice::new("x".repeat(13), "literal".to_string(), 68),
-            RawFileSlice::new("x".repeat(5), "templated".to_string(), 81),
-            RawFileSlice::new("x".repeat(24), "literal".to_string(), 86),
-            RawFileSlice::new("x".repeat(13), "templated".to_string(), 110),
-            RawFileSlice::new("x".repeat(9), "literal".to_string(), 123),
-            RawFileSlice::new("x".repeat(12), "block_end".to_string(), 132),
-            RawFileSlice::new("x".repeat(11), "literal".to_string(), 144),
-            RawFileSlice::new("x".repeat(24), "block_start".to_string(), 155),
-            RawFileSlice::new("x".repeat(10), "literal".to_string(), 179),
-            RawFileSlice::new("x".repeat(5), "templated".to_string(), 189),
-            RawFileSlice::new("x".repeat(9), "literal".to_string(), 194),
-            RawFileSlice::new("x".repeat(12), "block_end".to_string(), 203),
-            RawFileSlice::new("x".repeat(15), "literal".to_string(), 215),
+            RawFileSlice::new("x".repeat(13), "literal".to_string(), 0, None, None),
+            RawFileSlice::new("x".repeat(16), "comment".to_string(), 13, None, None),
+            RawFileSlice::new("x".repeat(15), "literal".to_string(), 29, None, None),
+            RawFileSlice::new("x".repeat(24), "block_start".to_string(), 44, None, None),
+            RawFileSlice::new("x".repeat(13), "literal".to_string(), 68, None, None),
+            RawFileSlice::new("x".repeat(5), "templated".to_string(), 81, None, None),
+            RawFileSlice::new("x".repeat(24), "literal".to_string(), 86, None, None),
+            RawFileSlice::new("x".repeat(13), "templated".to_string(), 110, None, None),
+            RawFileSlice::new("x".repeat(9), "literal".to_string(), 123, None, None),
+            RawFileSlice::new("x".repeat(12), "block_end".to_string(), 132, None, None),
+            RawFileSlice::new("x".repeat(11), "literal".to_string(), 144, None, None),
+            RawFileSlice::new("x".repeat(24), "block_start".to_string(), 155, None, None),
+            RawFileSlice::new("x".repeat(10), "literal".to_string(), 179, None, None),
+            RawFileSlice::new("x".repeat(5), "templated".to_string(), 189, None, None),
+            RawFileSlice::new("x".repeat(9), "literal".to_string(), 194, None, None),
+            RawFileSlice::new("x".repeat(12), "block_end".to_string(), 203, None, None),
+            RawFileSlice::new("x".repeat(15), "literal".to_string(), 215, None, None),
         ]
     }
 
@@ -1124,7 +1280,13 @@ mod tests {
                     Slice::from(0..20),
                     Slice::from(0..20),
                 )],
-                vec![RawFileSlice::new("x".repeat(20), "literal".to_string(), 0)],
+                vec![RawFileSlice::new(
+                    "x".repeat(20),
+                    "literal".to_string(),
+                    0,
+                    None,
+                    None,
+                )],
             ),
             // Trimming the end of a literal (with things that follow).
             (
@@ -1151,8 +1313,8 @@ mod tests {
                     Slice::from(0..20),
                 )],
                 vec![
-                    RawFileSlice::new("x".repeat(50), "literal".to_string(), 0),
-                    RawFileSlice::new("x".repeat(20), "literal".to_string(), 50),
+                    RawFileSlice::new("x".repeat(50), "literal".to_string(), 0, None, None),
+                    RawFileSlice::new("x".repeat(20), "literal".to_string(), 50, None, None),
                 ],
             ),
             // Spanning a template
@@ -1181,9 +1343,9 @@ mod tests {
                     ),
                 ],
                 vec![
-                    RawFileSlice::new("x".repeat(10), "literal".to_string(), 0),
-                    RawFileSlice::new("x".repeat(7), "templated".to_string(), 10),
-                    RawFileSlice::new("x".repeat(8), "literal".to_string(), 17),
+                    RawFileSlice::new("x".repeat(10), "literal".to_string(), 0, None, None),
+                    RawFileSlice::new("x".repeat(7), "templated".to_string(), 10, None, None),
+                    RawFileSlice::new("x".repeat(8), "literal".to_string(), 17, None, None),
                 ],
             ),
             // Handling templated
@@ -1213,6 +1375,8 @@ mod tests {
                             slc.raw.clone(),
                             "templated".to_string(),
                             slc.source_idx.clone(),
+                            None,
+                            None,
                         )
                     })
                     .collect(),
@@ -1252,7 +1416,13 @@ mod tests {
                 };
                 let extended_raw_sliced: Vec<RawFileSlice> = {
                     let mut raw_sliced = simple_file_kwargs.raw_sliced.clone();
-                    raw_sliced.push(RawFileSlice::new("x".repeat(10), "comment".to_string(), 25));
+                    raw_sliced.push(RawFileSlice::new(
+                        "x".repeat(10),
+                        "comment".to_string(),
+                        25,
+                        None,
+                        None,
+                    ));
                     raw_sliced
                 };
                 (

@@ -9,15 +9,21 @@ pub mod token;
 // include!(concat!(env!("OUT_DIR"), "/dialect_matcher.rs"));
 
 use dialect::matcher::*;
+#[cfg(feature = "python")]
 use lexer::python::{PyLexer, PySQLLexError};
+#[cfg(feature = "python")]
 use marker::python::PyPositionMarker;
+#[cfg(feature = "python")]
 use pyo3::prelude::*;
+#[cfg(feature = "python")]
 use templater::{
     fileslice::python::{PyRawFileSlice, PyTemplatedFileSlice},
     templatefile::python::PyTemplatedFile,
 };
+#[cfg(feature = "python")]
 use token::python::PyToken;
 
+#[cfg(feature = "python")]
 /// A Python module implemented in Rust.
 #[pymodule(name = "rsqlfluff")]
 fn rsqlfluff(m: &Bound<'_, PyModule>) -> PyResult<()> {

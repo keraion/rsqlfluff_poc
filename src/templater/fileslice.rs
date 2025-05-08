@@ -16,19 +16,26 @@ pub struct RawFileSlice {
 }
 
 impl RawFileSlice {
-    pub fn new(raw: String, slice_type: String, source_idx: usize) -> Self {
+    pub fn new(
+        raw: String,
+        slice_type: String,
+        source_idx: usize,
+        block_idx: Option<usize>,
+        tag: Option<String>,
+    ) -> Self {
         RawFileSlice {
             raw,
             slice_type,
             source_idx,
-            block_idx: 0,
-            tag: None,
+            block_idx: block_idx.unwrap_or_default(),
+            tag,
         }
     }
 
     pub fn end_source_idx(&self) -> usize {
         // Return the closing index of this slice.
-        self.source_idx + self.raw.len()
+        let len: usize = self.raw.len().try_into().unwrap();
+        self.source_idx + len
     }
 
     pub fn source_slice(&self) -> Slice {
@@ -74,11 +81,25 @@ pub mod python {
 
     #[pyclass(name = "RawFileSlice")]
     #[repr(transparent)]
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug, PartialEq, Hash)]
     pub struct PyRawFileSlice(pub(crate) RawFileSlice);
 
     #[pymethods]
     impl PyRawFileSlice {
+        #[new]
+        #[pyo3(signature = (raw, slice_type, source_idx, block_idx=0, tag=None))]
+        pub fn new(
+            raw: String,
+            slice_type: String,
+            source_idx: usize,
+            block_idx: Option<usize>,
+            tag: Option<String>,
+        ) -> Self {
+            Self(RawFileSlice::new(
+                raw, slice_type, source_idx, block_idx, tag,
+            ))
+        }
+
         #[getter]
         pub fn raw(&self) -> String {
             self.0.raw.clone()
@@ -109,13 +130,13 @@ pub mod python {
 
     impl From<RawFileSlice> for PyRawFileSlice {
         fn from(value: RawFileSlice) -> Self {
-            PyRawFileSlice(value)
+            Self(value)
         }
     }
 
     #[pyclass(name = "TemplatedFileSlice")]
     #[repr(transparent)]
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug, PartialEq, Hash)]
     pub struct PyTemplatedFileSlice(pub(crate) TemplatedFileSlice);
 
     #[pymethods]
@@ -148,6 +169,12 @@ pub mod python {
     impl Into<TemplatedFileSlice> for PyTemplatedFileSlice {
         fn into(self) -> TemplatedFileSlice {
             self.0
+        }
+    }
+
+    impl From<TemplatedFileSlice> for PyTemplatedFileSlice {
+        fn from(value: TemplatedFileSlice) -> Self {
+            Self(value)
         }
     }
 
@@ -197,10 +224,16 @@ pub mod python {
             fn extract_bound(obj: &pyo3::Bound<'py, pyo3::PyAny>) -> PyResult<Self> {
                 let raw = obj.getattr("raw")?.extract::<String>()?;
                 let slice_type = obj.getattr("slice_type")?.extract::<String>()?;
-                let source_idx = obj.getattr("source_idx")?.extract::<usize>()?;
+                let source_idx = obj.getattr("source_idx")?.extract::<usize>().ok();
+                let block_idx = obj.getattr("block_idx")?.extract::<usize>().ok();
+                let tag = obj.getattr("tag")?.extract::<Option<String>>()?;
 
                 Ok(Self(PyRawFileSlice(RawFileSlice::new(
-                    raw, slice_type, source_idx,
+                    raw.clone(),
+                    slice_type,
+                    source_idx.unwrap_or_else(|| raw.len()),
+                    block_idx,
+                    tag,
                 ))))
             }
         }

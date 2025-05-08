@@ -6,6 +6,9 @@ use regex::{Regex, RegexBuilder};
 
 use crate::{dialect::matcher::Dialect, marker::PositionMarker, token::Token};
 
+pub type TokenGenerator =
+    fn(String, PositionMarker, HashSet<String>, Option<Vec<String>>, Option<Vec<String>>, String) -> Token;
+
 #[derive(Debug, Clone)]
 pub enum LexerMode {
     String(String),                           // Match a literal string
@@ -41,17 +44,12 @@ pub struct LexMatcher {
     pub dialect: Dialect,
     pub name: String,
     pub mode: LexerMode,
-    pub token_class_func: fn(
-        String,
-        PositionMarker,
-        HashSet<String>,
-        Option<Vec<String>>,
-        Option<Vec<String>>,
-    ) -> Token,
+    pub token_class_func: TokenGenerator,
     pub subdivider: Option<Box<LexMatcher>>,
     pub trim_post_subdivide: Option<Box<LexMatcher>>,
     pub trim_start: Option<Vec<String>>,
     pub trim_chars: Option<Vec<String>>,
+    pub cache_key: String,
 }
 
 impl Display for LexMatcher {
@@ -65,17 +63,12 @@ impl LexMatcher {
         dialect: Dialect,
         name: &str,
         template: &str,
-        token_class_func: fn(
-            String,
-            PositionMarker,
-            HashSet<String>,
-            Option<Vec<String>>,
-            Option<Vec<String>>,
-        ) -> Token,
+        token_class_func: TokenGenerator,
         subdivider: Option<Box<LexMatcher>>,
         trim_post_subdivide: Option<Box<LexMatcher>>,
         trim_start: Option<Vec<String>>,
         trim_chars: Option<Vec<String>>,
+        cache_key: String,
     ) -> Self {
         Self {
             dialect,
@@ -86,6 +79,7 @@ impl LexMatcher {
             trim_post_subdivide,
             trim_start,
             trim_chars,
+            cache_key,
         }
     }
 
@@ -93,17 +87,12 @@ impl LexMatcher {
         dialect: Dialect,
         name: &str,
         pattern: &str,
-        token_class_func: fn(
-            String,
-            PositionMarker,
-            HashSet<String>,
-            Option<Vec<String>>,
-            Option<Vec<String>>,
-        ) -> Token,
+        token_class_func: TokenGenerator,
         subdivider: Option<Box<LexMatcher>>,
         trim_post_subdivide: Option<Box<LexMatcher>>,
         trim_start: Option<Vec<String>>,
         trim_chars: Option<Vec<String>>,
+        cache_key: String,
         fallback_lexer: Option<fn(&str, Dialect) -> Option<&str>>,
         precheck: fn(&str) -> bool,
     ) -> Self {
@@ -133,6 +122,7 @@ impl LexMatcher {
             trim_post_subdivide,
             trim_start,
             trim_chars,
+            cache_key,
         }
     }
 
@@ -140,17 +130,12 @@ impl LexMatcher {
         dialect: Dialect,
         name: &str,
         template: &str,
-        token_class_func: fn(
-            String,
-            PositionMarker,
-            HashSet<String>,
-            Option<Vec<String>>,
-            Option<Vec<String>>,
-        ) -> Token,
+        token_class_func: TokenGenerator,
         subdivider: Option<Box<LexMatcher>>,
         trim_post_subdivide: Option<Box<LexMatcher>>,
         trim_start: Option<Vec<String>>,
         trim_chars: Option<Vec<String>>,
+        cache_key: String,
         fallback_lexer: Option<fn(&str, Dialect) -> Option<&str>>,
         precheck: fn(&str) -> bool,
     ) -> Self {
@@ -164,6 +149,7 @@ impl LexMatcher {
             trim_post_subdivide,
             trim_start,
             trim_chars,
+            cache_key,
             fallback_lexer,
             precheck,
         )
@@ -173,17 +159,12 @@ impl LexMatcher {
         dialect: Dialect,
         name: &str,
         template: &str,
-        token_class_func: fn(
-            String,
-            PositionMarker,
-            HashSet<String>,
-            Option<Vec<String>>,
-            Option<Vec<String>>,
-        ) -> Token,
+        token_class_func: TokenGenerator,
         subdivider: Option<Box<LexMatcher>>,
         trim_post_subdivide: Option<Box<LexMatcher>>,
         trim_start: Option<Vec<String>>,
         trim_chars: Option<Vec<String>>,
+        cache_key: String,
         fallback_lexer: Option<fn(&str, Dialect) -> Option<&str>>,
         precheck: fn(&str) -> bool,
     ) -> Self {
@@ -197,6 +178,7 @@ impl LexMatcher {
             trim_post_subdivide,
             trim_start,
             trim_chars,
+            cache_key,
             fallback_lexer,
             precheck,
         )
@@ -341,6 +323,7 @@ impl LexMatcher {
             class_types,
             self.trim_start.clone(),
             self.trim_chars.clone(),
+            self.cache_key.clone(),
         )
     }
 }
@@ -387,6 +370,8 @@ pub mod python {}
 
 #[cfg(test)]
 mod test {
+    use uuid::Uuid;
+
     use crate::{dialect::matcher::Dialect, token::Token};
 
     use super::{extract_nested_block_comment, LexMatcher};
@@ -407,6 +392,7 @@ mod test {
                 None,
                 None,
                 None,
+                Uuid::new_v4().to_string(),
                 None,
                 |_| true,
             ))),
@@ -419,11 +405,13 @@ mod test {
                 None,
                 None,
                 None,
+                Uuid::new_v4().to_string(),
                 None,
                 |_| true,
             ))),
             None,
             None,
+            Uuid::new_v4().to_string(),
             Some(extract_nested_block_comment),
             |input| input.starts_with("/"),
         );

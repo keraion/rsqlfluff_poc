@@ -1,12 +1,13 @@
 use std::{
     fmt::{Debug, Display},
-    sync::Arc,
+    sync::{Arc, Weak},
 };
 
 use hashbrown::{HashMap, HashSet};
 use pyo3::{
     prelude::*,
     types::{PyString, PyTuple, PyType},
+    BoundObject,
 };
 
 use crate::marker::python::{PyPositionMarker, PySqlFluffPositionMarker};
@@ -147,6 +148,21 @@ impl PyToken {
         self.0.block_type()
     }
 
+    #[getter]
+    pub fn cache_key(&self) -> String {
+        self.0.cache_key.clone()
+    }
+
+    #[getter]
+    pub fn trim_start(&self) -> Option<Vec<String>> {
+        self.0.trim_start.clone()
+    }
+
+    #[getter]
+    pub fn trim_chars(&self) -> Option<Vec<String>> {
+        self.0.trim_chars.clone()
+    }
+
     #[pyo3(signature = (raw_only = false))]
     pub fn count_segments(&self, raw_only: Option<bool>) -> usize {
         self.0.count_segments(raw_only.unwrap_or_default())
@@ -161,11 +177,7 @@ impl PyToken {
         seg_strs.clone().iter().for_each(|s| {
             seg_set.insert(s.clone());
         });
-        self.0
-            .token_type
-            .clone()
-            .map(|t| seg_strs.contains(&t))
-            .unwrap_or_default()
+        seg_strs.contains(&self.0.token_type)
             || self.0.class_types.intersection(&seg_set).count() > 0
     }
 
@@ -184,8 +196,23 @@ impl PyToken {
     }
 
     #[getter]
+    pub fn is_comment(&self) -> bool {
+        self.0.is_comment
+    }
+
+    #[getter]
     pub fn class_types(&self) -> HashSet<String> {
         self.0.class_types.clone()
+    }
+
+    #[getter]
+    pub fn instance_types(&self) -> Vec<String> {
+        self.0.class_types.clone().into_iter().collect()
+    }
+
+    #[getter]
+    pub fn preface_modifier(&self) -> String {
+        self.0.preface_modifier.clone()
     }
 
     #[getter]
@@ -315,15 +342,13 @@ impl PyToken {
         self.0._get_raw_segment_kwargs()
     }
 
-    // pub fn set_parent<'py>(&mut self, parent: Bound<'py, PyAny>, idx: i32) {
-    pub fn set_parent<'py>(&self, parent: Bound<'py, PyAny>, idx: usize) {
-        let parent_token: Token = parent
-            .extract::<PySqlFluffToken>()
-            .map(Into::into)
-            .expect("bad parent");
-        self.0
-            .clone()
-            .set_parent(Arc::new(parent_token.clone()), idx);
+    pub fn set_parent(&self, parent: &Bound<'_, PyAny>, idx: usize) -> PyResult<()> {
+        let parent: Arc<Token> = parent
+            .extract()
+            .map(|t: PySqlFluffToken| Arc::new(t.0 .0))?;
+        let mut inner = self.0.clone();
+        inner.set_parent(parent, idx);
+        Ok(())
     }
 
     pub fn get_parent(&self) -> Option<(PyToken, i32)> {
@@ -455,6 +480,12 @@ impl<'py> FromPyObject<'py> for PySqlFluffToken {
         let pos_marker = ob
             .getattr("pos_marker")?
             .extract::<PySqlFluffPositionMarker>()?;
+        // println!("{:#?}", ob);
+        let cache_key = ob
+            .getattr("_cache_key")
+            .unwrap_or(ob.getattr("cache_key")?)
+            .extract::<String>()
+            .unwrap_or("".to_string());
         // println!("pos_marker: {:?}", pos_marker);
         Ok(Self(PyToken(Token::base_token(
             raw,
@@ -463,6 +494,7 @@ impl<'py> FromPyObject<'py> for PySqlFluffToken {
             segments,
             None,
             None,
+            cache_key,
         ))))
     }
 }

@@ -14,6 +14,7 @@ impl Token {
         segments: Vec<Token>,
         trim_start: Option<Vec<String>>,
         trim_chars: Option<Vec<String>>,
+        cache_key: String,
     ) -> Self {
         let (token_type, class_types) = iter_base_types("base", class_types);
         Self {
@@ -42,6 +43,7 @@ impl Token {
             source_fixes: None,
             trim_start,
             trim_chars,
+            cache_key,
         }
     }
 
@@ -51,13 +53,22 @@ impl Token {
         class_types: HashSet<String>,
         trim_start: Option<Vec<String>>,
         trim_chars: Option<Vec<String>>,
+        cache_key: String,
     ) -> Self {
         let (token_type, class_types) = iter_base_types("raw", class_types);
         Self {
             token_type,
             // Match python's string
             suffix: format!("'{}'", raw.escape_debug().to_string().trim_matches('"')),
-            ..Token::base_token(raw, pos_marker, class_types, vec![], trim_start, trim_chars)
+            ..Token::base_token(
+                raw,
+                pos_marker,
+                class_types,
+                vec![],
+                trim_start,
+                trim_chars,
+                cache_key,
+            )
         }
     }
 
@@ -67,9 +78,17 @@ impl Token {
         class_types: HashSet<String>,
         trim_start: Option<Vec<String>>,
         trim_chars: Option<Vec<String>>,
+        cache_key: String,
     ) -> Self {
         Self {
-            ..Self::raw_token(raw, pos_marker, class_types, trim_start, trim_chars)
+            ..Self::raw_token(
+                raw,
+                pos_marker,
+                class_types,
+                trim_start,
+                trim_chars,
+                cache_key,
+            )
         }
     }
 
@@ -79,11 +98,19 @@ impl Token {
         class_types: HashSet<String>,
         trim_start: Option<Vec<String>>,
         trim_chars: Option<Vec<String>>,
+        cache_key: String,
     ) -> Self {
         let (token_type, class_types) = iter_base_types("symbol", class_types);
         Self {
             token_type,
-            ..Self::code_token(raw, pos_marker, class_types, trim_start, trim_chars)
+            ..Self::code_token(
+                raw,
+                pos_marker,
+                class_types,
+                trim_start,
+                trim_chars,
+                cache_key,
+            )
         }
     }
 
@@ -93,11 +120,19 @@ impl Token {
         class_types: HashSet<String>,
         trim_start: Option<Vec<String>>,
         trim_chars: Option<Vec<String>>,
+        cache_key: String,
     ) -> Self {
         let (token_type, class_types) = iter_base_types("identifier", class_types);
         Self {
             token_type,
-            ..Self::code_token(raw, pos_marker, class_types, trim_start, trim_chars)
+            ..Self::code_token(
+                raw,
+                pos_marker,
+                class_types,
+                trim_start,
+                trim_chars,
+                cache_key,
+            )
         }
     }
 
@@ -107,11 +142,19 @@ impl Token {
         class_types: HashSet<String>,
         trim_start: Option<Vec<String>>,
         trim_chars: Option<Vec<String>>,
+        cache_key: String,
     ) -> Self {
         let (token_type, class_types) = iter_base_types("literal", class_types);
         Self {
             token_type,
-            ..Self::code_token(raw, pos_marker, class_types, trim_start, trim_chars)
+            ..Self::code_token(
+                raw,
+                pos_marker,
+                class_types,
+                trim_start,
+                trim_chars,
+                cache_key,
+            )
         }
     }
 
@@ -121,11 +164,19 @@ impl Token {
         class_types: HashSet<String>,
         trim_start: Option<Vec<String>>,
         trim_chars: Option<Vec<String>>,
+        cache_key: String,
     ) -> Self {
         let (token_type, class_types) = iter_base_types("binary_operator", class_types);
         Self {
             token_type,
-            ..Self::code_token(raw, pos_marker, class_types, trim_start, trim_chars)
+            ..Self::code_token(
+                raw,
+                pos_marker,
+                class_types,
+                trim_start,
+                trim_chars,
+                cache_key,
+            )
         }
     }
 
@@ -135,11 +186,19 @@ impl Token {
         class_types: HashSet<String>,
         trim_start: Option<Vec<String>>,
         trim_chars: Option<Vec<String>>,
+        cache_key: String,
     ) -> Self {
         let (token_type, class_types) = iter_base_types("comparison_operator", class_types);
         Self {
             token_type,
-            ..Self::code_token(raw, pos_marker, class_types, trim_start, trim_chars)
+            ..Self::code_token(
+                raw,
+                pos_marker,
+                class_types,
+                trim_start,
+                trim_chars,
+                cache_key,
+            )
         }
     }
 
@@ -149,11 +208,19 @@ impl Token {
         class_types: HashSet<String>,
         trim_start: Option<Vec<String>>,
         trim_chars: Option<Vec<String>>,
+        cache_key: String,
     ) -> Self {
         let (token_type, class_types) = iter_base_types("word", class_types);
         Self {
             token_type,
-            ..Self::code_token(raw, pos_marker, class_types, trim_start, trim_chars)
+            ..Self::code_token(
+                raw,
+                pos_marker,
+                class_types,
+                trim_start,
+                trim_chars,
+                cache_key,
+            )
         }
     }
 
@@ -163,11 +230,19 @@ impl Token {
         class_types: HashSet<String>,
         trim_start: Option<Vec<String>>,
         trim_chars: Option<Vec<String>>,
+        cache_key: String,
     ) -> Self {
         let (token_type, class_types) = iter_base_types("unlexable", class_types);
         Self {
             token_type,
-            ..Self::code_token(raw, pos_marker, class_types, trim_start, trim_chars)
+            ..Self::code_token(
+                raw,
+                pos_marker,
+                class_types,
+                trim_start,
+                trim_chars,
+                cache_key,
+            )
         }
     }
 
@@ -177,6 +252,7 @@ impl Token {
         class_types: HashSet<String>,
         trim_start: Option<Vec<String>>,
         trim_chars: Option<Vec<String>>,
+        cache_key: String,
     ) -> Self {
         let (token_type, class_types) = iter_base_types("whitespace", class_types);
         Self {
@@ -185,7 +261,14 @@ impl Token {
             is_code: false,
             is_comment: false,
             _default_raw: " ".to_string(),
-            ..Self::raw_token(raw, pos_marker, class_types, trim_start, trim_chars)
+            ..Self::raw_token(
+                raw,
+                pos_marker,
+                class_types,
+                trim_start,
+                trim_chars,
+                cache_key,
+            )
         }
     }
 
@@ -195,6 +278,7 @@ impl Token {
         class_types: HashSet<String>,
         trim_start: Option<Vec<String>>,
         trim_chars: Option<Vec<String>>,
+        cache_key: String,
     ) -> Self {
         let (token_type, class_types) = iter_base_types("newline", class_types);
         Self {
@@ -203,7 +287,14 @@ impl Token {
             is_code: false,
             is_comment: false,
             _default_raw: "\n".to_string(),
-            ..Self::raw_token(raw, pos_marker, class_types, trim_start, trim_chars)
+            ..Self::raw_token(
+                raw,
+                pos_marker,
+                class_types,
+                trim_start,
+                trim_chars,
+                cache_key,
+            )
         }
     }
 
@@ -213,13 +304,21 @@ impl Token {
         class_types: HashSet<String>,
         trim_start: Option<Vec<String>>,
         trim_chars: Option<Vec<String>>,
+        cache_key: String,
     ) -> Self {
         let (token_type, class_types) = iter_base_types("comment", class_types);
         Self {
             token_type,
             is_code: false,
             is_comment: true,
-            ..Self::raw_token(raw, pos_marker, class_types, trim_start, trim_chars)
+            ..Self::raw_token(
+                raw,
+                pos_marker,
+                class_types,
+                trim_start,
+                trim_chars,
+                cache_key,
+            )
         }
     }
 
@@ -228,6 +327,7 @@ impl Token {
         is_templated: bool,
         block_uuid: Option<Uuid>,
         class_types: HashSet<String>,
+        cache_key: String,
     ) -> Self {
         let (token_type, class_types) = iter_base_types("meta", class_types);
         Self {
@@ -238,7 +338,14 @@ impl Token {
             block_uuid,
             preface_modifier: "[META] ".to_string(),
             suffix: String::new(),
-            ..Self::raw_token("".to_string(), pos_marker, class_types, None, None)
+            ..Self::raw_token(
+                "".to_string(),
+                pos_marker,
+                class_types,
+                None,
+                None,
+                cache_key,
+            )
         }
     }
 
@@ -251,7 +358,13 @@ impl Token {
         let (token_type, class_types) = iter_base_types("end_of_file", class_types);
         Self {
             token_type,
-            ..Self::meta_token(pos_marker, is_templated, block_uuid, class_types)
+            ..Self::meta_token(
+                pos_marker,
+                is_templated,
+                block_uuid,
+                class_types,
+                "eof_token".to_string(),
+            )
         }
     }
 
@@ -260,6 +373,7 @@ impl Token {
         is_templated: bool,
         block_uuid: Option<Uuid>,
         class_types: HashSet<String>,
+        cache_key: Option<String>,
     ) -> Self {
         let (token_type, class_types) = iter_base_types("indent", class_types);
         Self {
@@ -268,7 +382,13 @@ impl Token {
             suffix: block_uuid
                 .map(|u| u.as_hyphenated().to_string())
                 .unwrap_or_default(),
-            ..Self::meta_token(pos_marker, is_templated, block_uuid, class_types)
+            ..Self::meta_token(
+                pos_marker,
+                is_templated,
+                block_uuid,
+                class_types,
+                cache_key.unwrap_or("indent".to_string()),
+            )
         }
     }
 
@@ -282,7 +402,13 @@ impl Token {
         Self {
             token_type,
             indent_value: -1,
-            ..Self::indent_token(pos_marker, is_templated, block_uuid, class_types)
+            ..Self::indent_token(
+                pos_marker,
+                is_templated,
+                block_uuid,
+                class_types,
+                Some("dedent".to_string()),
+            )
         }
     }
 
@@ -294,7 +420,13 @@ impl Token {
         let (token_type, class_types) = iter_base_types("template_loop", class_types);
         Self {
             token_type,
-            ..Self::meta_token(pos_marker, false, block_uuid, class_types)
+            ..Self::meta_token(
+                pos_marker,
+                false,
+                block_uuid,
+                class_types,
+                "loop_token".to_string(),
+            )
         }
     }
 
@@ -310,7 +442,13 @@ impl Token {
             token_type,
             block_type: Some(block_type),
             source_str: Some(source_string),
-            ..Self::meta_token(pos_marker, false, block_uuid, class_types)
+            ..Self::meta_token(
+                pos_marker,
+                false,
+                block_uuid,
+                class_types,
+                "placeholder_token".to_string(),
+            )
         }
     }
 
@@ -341,14 +479,9 @@ impl Token {
     }
 }
 
-fn iter_base_types(
-    token_type: &str,
-    class_types: HashSet<String>,
-) -> (Option<String>, HashSet<String>) {
+fn iter_base_types(token_type: &str, class_types: HashSet<String>) -> (String, HashSet<String>) {
     let mut class_types = class_types;
-    let token_type = Some(token_type.to_string());
-    if let Some(token_type) = token_type.clone() {
-        class_types.insert(token_type);
-    }
+    let token_type = token_type.to_string();
+    class_types.insert(token_type.clone());
     (token_type, class_types)
 }
