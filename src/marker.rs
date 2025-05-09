@@ -276,8 +276,7 @@ pub mod python {
 
         #[getter]
         pub fn templated_file(&self) -> PyTemplatedFile {
-            // dbg!("templated file from PositionMarker");
-            PyTemplatedFile(Arc::clone(&self.0.templated_file))
+            PyTemplatedFile(self.0.templated_file.clone())
         }
 
         #[getter]

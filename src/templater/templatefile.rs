@@ -122,63 +122,12 @@ impl TemplatedFile {
 
         #[cfg(feature = "unicode")]
         {
-            let unicode_sliced_file = {
-                let char_source_vec = source_str
-                    .char_indices()
-                    .map(|(i, _)| i)
-                    .collect::<Vec<_>>();
-                let char_templated_vec = &templated_str_in
-                    .char_indices()
-                    .map(|(i, _)| i)
-                    .collect::<Vec<_>>();
-
-                sliced_file
-                    .iter()
-                    .map(|slice| {
-                        let mut new_slice = slice.clone();
-
-                        new_slice.source_slice.start = char_source_vec
-                            .iter()
-                            .position(|&c| c == new_slice.source_slice.start)
-                            .unwrap_or(char_source_vec.len());
-                        new_slice.source_slice.stop = char_source_vec
-                            .iter()
-                            .position(|&c| c == new_slice.source_slice.stop)
-                            .unwrap_or(char_source_vec.len());
-                        new_slice.templated_slice.start = char_templated_vec
-                            .iter()
-                            .position(|&c| c == new_slice.templated_slice.start)
-                            .unwrap_or(char_templated_vec.len());
-                        new_slice.templated_slice.stop = char_templated_vec
-                            .iter()
-                            .position(|&c| c == new_slice.templated_slice.stop)
-                            .unwrap_or(char_templated_vec.len());
-
-                        new_slice
-                    })
-                    .collect()
-            };
-            let unicode_raw_file = {
-                if raw_sliced.len() == 1 {
-                    raw_sliced.clone()
-                } else {
-                    log::debug!("running raw utf to unicode conversion step.");
-                    let mut idx = 0;
-                    raw_sliced
-                        .clone()
-                        .iter()
-                        .map(|rs| {
-                            let mut slice = rs.clone();
-                            slice.source_idx = idx;
-                            idx += slice.raw.chars().count();
-                            slice
-                        })
-                        .collect::<Vec<_>>()
-                }
-            };
-            let unicode_source_newlines = iter_codepoint_indices_of_newlines(&source_str).collect();
-            let unicode_templated_newlines =
-                iter_codepoint_indices_of_newlines(&templated_str_in).collect();
+            let (
+                unicode_sliced_file,
+                unicode_raw_file,
+                unicode_source_newlines,
+                unicode_templated_newlines,
+            ) = get_unicode_data(&source_str, &templated_str_in, &sliced_file, &raw_sliced);
 
             return TemplatedFile {
                 source_str,
@@ -206,6 +155,41 @@ impl TemplatedFile {
                 source_newlines,
                 templated_newlines,
             }
+        }
+    }
+
+    pub fn copy(
+        source_str: String,
+        fname: String,
+        templated_str: String,
+        sliced_file: Vec<TemplatedFileSlice>,
+        raw_sliced: Vec<RawFileSlice>,
+        source_newlines: Vec<usize>,
+        templated_newlines: Vec<usize>,
+    ) -> Self {
+        #[cfg(feature = "unicode")]
+        let (
+            unicode_sliced_file,
+            unicode_raw_file,
+            unicode_source_newlines,
+            unicode_templated_newlines,
+        ) = get_unicode_data(&source_str, &templated_str, &sliced_file, &raw_sliced);
+        TemplatedFile {
+            source_str,
+            fname,
+            templated_str,
+            sliced_file,
+            raw_sliced,
+            source_newlines,
+            templated_newlines,
+            #[cfg(feature = "unicode")]
+            unicode_sliced_file,
+            #[cfg(feature = "unicode")]
+            unicode_raw_file,
+            #[cfg(feature = "unicode")]
+            unicode_source_newlines,
+            #[cfg(feature = "unicode")]
+            unicode_templated_newlines,
         }
     }
 
@@ -360,6 +344,82 @@ impl TemplatedFile {
 
         Slice::from(source_start..source_stop)
     }
+}
+
+#[cfg(feature = "unicode")]
+fn get_unicode_data(
+    source_str: &String,
+    templated_str_in: &String,
+    sliced_file: &Vec<TemplatedFileSlice>,
+    raw_sliced: &Vec<RawFileSlice>,
+) -> (
+    Vec<TemplatedFileSlice>,
+    Vec<RawFileSlice>,
+    Vec<usize>,
+    Vec<usize>,
+) {
+    let unicode_sliced_file = {
+        let char_source_vec = source_str
+            .char_indices()
+            .map(|(i, _)| i)
+            .collect::<Vec<_>>();
+        let char_templated_vec = &templated_str_in
+            .char_indices()
+            .map(|(i, _)| i)
+            .collect::<Vec<_>>();
+
+        sliced_file
+            .iter()
+            .map(|slice| {
+                let mut new_slice = slice.clone();
+
+                new_slice.source_slice.start = char_source_vec
+                    .iter()
+                    .position(|&c| c == new_slice.source_slice.start)
+                    .unwrap_or(char_source_vec.len());
+                new_slice.source_slice.stop = char_source_vec
+                    .iter()
+                    .position(|&c| c == new_slice.source_slice.stop)
+                    .unwrap_or(char_source_vec.len());
+                new_slice.templated_slice.start = char_templated_vec
+                    .iter()
+                    .position(|&c| c == new_slice.templated_slice.start)
+                    .unwrap_or(char_templated_vec.len());
+                new_slice.templated_slice.stop = char_templated_vec
+                    .iter()
+                    .position(|&c| c == new_slice.templated_slice.stop)
+                    .unwrap_or(char_templated_vec.len());
+
+                new_slice
+            })
+            .collect()
+    };
+    let unicode_raw_file = {
+        if raw_sliced.len() == 1 {
+            raw_sliced.clone()
+        } else {
+            log::debug!("running raw utf to unicode conversion step.");
+            let mut idx = 0;
+            raw_sliced
+                .clone()
+                .iter()
+                .map(|rs| {
+                    let mut slice = rs.clone();
+                    slice.source_idx = idx;
+                    idx += slice.raw.chars().count();
+                    slice
+                })
+                .collect::<Vec<_>>()
+        }
+    };
+    let unicode_source_newlines = iter_codepoint_indices_of_newlines(source_str).collect();
+    let unicode_templated_newlines = iter_codepoint_indices_of_newlines(templated_str_in).collect();
+    (
+        unicode_sliced_file,
+        unicode_raw_file,
+        unicode_source_newlines,
+        unicode_templated_newlines,
+    )
 }
 
 impl From<String> for TemplatedFile {
@@ -739,17 +799,21 @@ pub mod python {
             templated_str: String,
             sliced_file: Vec<TemplatedFileSlice>,
             raw_sliced: Vec<RawFileSlice>,
+            source_newlines: Vec<usize>,
+            templated_newlines: Vec<usize>,
         ) -> Self {
             // let t1 = Instant::now();
             log::debug!("PyTemplatedFile::from_python: {}", fname);
             // let source_newlines = iter_indices_of_newlines(&source_str).collect();
             // let templated_newlines = iter_indices_of_newlines(&templated_str).collect();
-            let tf = Arc::new(TemplatedFile::new(
+            let tf = Arc::new(TemplatedFile::copy(
                 source_str,
                 fname,
-                Some(templated_str),
-                Some(sliced_file),
-                Some(raw_sliced),
+                templated_str,
+                sliced_file,
+                raw_sliced,
+                source_newlines,
+                templated_newlines,
             ));
             // let unicode_sliced_file = utf8_to_unicode_slices(&tf);
             // let unicode_raw_sliced = raw_slices_to_py(&tf);
@@ -923,10 +987,10 @@ pub mod python {
                 .collect::<Vec<_>>();
             let raw_sliced = PyTemplatedFile::py_raw_slices(&py_raw_sliced);
 
-            // let py_source_newlines = obj.getattr("_source_newlines")?.extract::<Vec<usize>>()?;
-            // let py_templated_newlines = obj
-            //     .getattr("_templated_newlines")?
-            //     .extract::<Vec<usize>>()?;
+            let py_source_newlines = obj.getattr("_source_newlines")?.extract::<Vec<usize>>()?;
+            let py_templated_newlines = obj
+                .getattr("_templated_newlines")?
+                .extract::<Vec<usize>>()?;
 
             // let t2 = t1.elapsed();
             // log::debug!("PySqlFluffTemplatedFile::extract_bound: {}", t2.as_nanos());
@@ -938,11 +1002,13 @@ pub mod python {
                     templated_str,
                     sliced_file,
                     raw_sliced,
+                    py_source_newlines,
+                    py_templated_newlines,
                 )
                 .into(),
             );
 
-            cache.insert(key, tf.0.0.clone());
+            cache.insert(key, tf.0 .0.clone());
             Ok(tf)
         }
     }
