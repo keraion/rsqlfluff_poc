@@ -19,7 +19,7 @@ hashbrown = "0.15.2"
 itertools = "0.14.0"
 log = "0.4.25"
 once_cell = "1.20.2"
-pyo3 = { version = "0.24.2", optional = true, features = ["hashbrown", "extension-module"] }
+pyo3 = { version = "0.24.2", optional = true, features = ["hashbrown", "extension-module", "uuid"] }
 pyo3-log = { version = "0.12.1", optional = true }
 regex = { version = "1.11.1", features = ["perf"] }
 slotmap = "1.0.7"

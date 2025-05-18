@@ -669,7 +669,7 @@ pub mod python {
     //         .collect()
     // }
 
-    #[pyclass(name = "TemplatedFile", frozen)]
+    #[pyclass(name = "RsTemplatedFile", frozen)]
     #[repr(transparent)]
     #[derive(Clone, PartialEq, Hash)]
     pub struct PyTemplatedFile(pub Arc<TemplatedFile>);

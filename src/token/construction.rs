@@ -16,9 +16,9 @@ impl Token {
         trim_chars: Option<Vec<String>>,
         cache_key: String,
     ) -> Self {
-        let (token_type, class_types) = iter_base_types("base", class_types);
+        let (token_types, class_types) = iter_base_types("base", class_types.clone());
         Self {
-            token_type,
+            token_types,
             class_types,
             comment_separate: false,
             is_meta: false,
@@ -57,7 +57,7 @@ impl Token {
     ) -> Self {
         let (token_type, class_types) = iter_base_types("raw", class_types);
         Self {
-            token_type,
+            token_types: token_type,
             // Match python's string
             suffix: format!("'{}'", raw.escape_debug().to_string().trim_matches('"')),
             ..Token::base_token(
@@ -102,7 +102,7 @@ impl Token {
     ) -> Self {
         let (token_type, class_types) = iter_base_types("symbol", class_types);
         Self {
-            token_type,
+            token_types: token_type,
             ..Self::code_token(
                 raw,
                 pos_marker,
@@ -124,7 +124,7 @@ impl Token {
     ) -> Self {
         let (token_type, class_types) = iter_base_types("identifier", class_types);
         Self {
-            token_type,
+            token_types: token_type,
             ..Self::code_token(
                 raw,
                 pos_marker,
@@ -146,7 +146,7 @@ impl Token {
     ) -> Self {
         let (token_type, class_types) = iter_base_types("literal", class_types);
         Self {
-            token_type,
+            token_types: token_type,
             ..Self::code_token(
                 raw,
                 pos_marker,
@@ -168,7 +168,7 @@ impl Token {
     ) -> Self {
         let (token_type, class_types) = iter_base_types("binary_operator", class_types);
         Self {
-            token_type,
+            token_types: token_type,
             ..Self::code_token(
                 raw,
                 pos_marker,
@@ -190,7 +190,7 @@ impl Token {
     ) -> Self {
         let (token_type, class_types) = iter_base_types("comparison_operator", class_types);
         Self {
-            token_type,
+            token_types: token_type,
             ..Self::code_token(
                 raw,
                 pos_marker,
@@ -212,7 +212,7 @@ impl Token {
     ) -> Self {
         let (token_type, class_types) = iter_base_types("word", class_types);
         Self {
-            token_type,
+            token_types: token_type,
             ..Self::code_token(
                 raw,
                 pos_marker,
@@ -234,7 +234,7 @@ impl Token {
     ) -> Self {
         let (token_type, class_types) = iter_base_types("unlexable", class_types);
         Self {
-            token_type,
+            token_types: token_type,
             ..Self::code_token(
                 raw,
                 pos_marker,
@@ -256,7 +256,7 @@ impl Token {
     ) -> Self {
         let (token_type, class_types) = iter_base_types("whitespace", class_types);
         Self {
-            token_type,
+            token_types: token_type,
             is_whitespace: true,
             is_code: false,
             is_comment: false,
@@ -282,7 +282,7 @@ impl Token {
     ) -> Self {
         let (token_type, class_types) = iter_base_types("newline", class_types);
         Self {
-            token_type,
+            token_types: token_type,
             is_whitespace: true,
             is_code: false,
             is_comment: false,
@@ -308,7 +308,7 @@ impl Token {
     ) -> Self {
         let (token_type, class_types) = iter_base_types("comment", class_types);
         Self {
-            token_type,
+            token_types: token_type,
             is_code: false,
             is_comment: true,
             ..Self::raw_token(
@@ -331,7 +331,7 @@ impl Token {
     ) -> Self {
         let (token_type, class_types) = iter_base_types("meta", class_types);
         Self {
-            token_type,
+            token_types: token_type,
             is_code: false,
             is_meta: true,
             is_templated,
@@ -357,7 +357,7 @@ impl Token {
     ) -> Self {
         let (token_type, class_types) = iter_base_types("end_of_file", class_types);
         Self {
-            token_type,
+            token_types: token_type,
             ..Self::meta_token(
                 pos_marker,
                 is_templated,
@@ -377,7 +377,7 @@ impl Token {
     ) -> Self {
         let (token_type, class_types) = iter_base_types("indent", class_types);
         Self {
-            token_type,
+            token_types: token_type,
             indent_value: 1,
             suffix: block_uuid
                 .map(|u| u.as_hyphenated().to_string())
@@ -400,7 +400,7 @@ impl Token {
     ) -> Self {
         let (token_type, class_types) = iter_base_types("dedent", class_types);
         Self {
-            token_type,
+            token_types: token_type,
             indent_value: -1,
             ..Self::indent_token(
                 pos_marker,
@@ -419,7 +419,7 @@ impl Token {
     ) -> Self {
         let (token_type, class_types) = iter_base_types("template_loop", class_types);
         Self {
-            token_type,
+            token_types: token_type,
             ..Self::meta_token(
                 pos_marker,
                 false,
@@ -439,7 +439,7 @@ impl Token {
     ) -> Self {
         let (token_type, class_types) = iter_base_types("placeholder", class_types);
         Self {
-            token_type,
+            token_types: token_type,
             block_type: Some(block_type),
             source_str: Some(source_string),
             ..Self::meta_token(
@@ -479,9 +479,12 @@ impl Token {
     }
 }
 
-fn iter_base_types(token_type: &str, class_types: HashSet<String>) -> (String, HashSet<String>) {
+fn iter_base_types(
+    token_type: &str,
+    class_types: HashSet<String>,
+) -> (Vec<String>, HashSet<String>) {
     let mut class_types = class_types;
     let token_type = token_type.to_string();
     class_types.insert(token_type.clone());
-    (token_type, class_types)
+    (vec![token_type], class_types)
 }

@@ -1,20 +1,20 @@
 use std::{
     fmt::{Debug, Display},
-    sync::{Arc, Weak},
+    sync::Arc,
 };
 
 use hashbrown::{HashMap, HashSet};
 use pyo3::{
     prelude::*,
     types::{PyString, PyTuple, PyType},
-    BoundObject,
 };
+use uuid::Uuid;
 
 use crate::marker::python::{PyPositionMarker, PySqlFluffPositionMarker};
 
 use super::{path::PathStep, SourceFix, Token, TupleSerialisedSegment};
 
-#[pyclass(name = "SourceFix")]
+#[pyclass(name = "RsSourceFix")]
 #[repr(transparent)]
 #[derive(Clone)]
 pub struct PySourceFix(pub SourceFix);
@@ -31,7 +31,7 @@ impl From<SourceFix> for PySourceFix {
     }
 }
 
-#[pyclass(name = "PathStep")]
+#[pyclass(name = "RsPathStep")]
 #[repr(transparent)]
 #[derive(Clone)]
 pub struct PyPathStep(pub PathStep);
@@ -48,7 +48,7 @@ impl From<PathStep> for PyPathStep {
     }
 }
 
-#[pyclass(name = "TupleSerialisedSegment")]
+#[pyclass(name = "RsTupleSerialisedSegment")]
 #[repr(transparent)]
 #[derive(Clone)]
 pub struct PyTupleSerialisedSegment(pub TupleSerialisedSegment);
@@ -93,7 +93,7 @@ impl From<TupleSerialisedSegment> for PyTupleSerialisedSegment {
     }
 }
 
-#[pyclass(name = "Token", weakref)]
+#[pyclass(name = "RsToken", weakref)]
 #[repr(transparent)]
 #[derive(Debug, Clone)]
 pub struct PyToken(pub Token);
@@ -144,8 +144,18 @@ impl PyToken {
     }
 
     #[getter]
+    pub fn source_str(&self) -> Option<String> {
+        self.0.source_str.clone()
+    }
+
+    #[getter]
     pub fn block_type(&self) -> Option<String> {
         self.0.block_type()
+    }
+
+    #[getter]
+    pub fn block_uuid(&self) -> Option<Uuid> {
+        self.0.block_uuid.clone()
     }
 
     #[getter]
@@ -177,8 +187,11 @@ impl PyToken {
         seg_strs.clone().iter().for_each(|s| {
             seg_set.insert(s.clone());
         });
-        seg_strs.contains(&self.0.token_type)
-            || self.0.class_types.intersection(&seg_set).count() > 0
+        self.0
+            .token_types
+            .iter()
+            .any(|token_type| seg_strs.contains(token_type))
+            || self.0.class_types().intersection(&seg_set).count() > 0
     }
 
     #[getter]
@@ -202,12 +215,12 @@ impl PyToken {
 
     #[getter]
     pub fn class_types(&self) -> HashSet<String> {
-        self.0.class_types.clone()
+        self.0.class_types()
     }
 
     #[getter]
     pub fn instance_types(&self) -> Vec<String> {
-        self.0.class_types.clone().into_iter().collect()
+        self.0.token_types.clone()
     }
 
     #[getter]

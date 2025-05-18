@@ -307,7 +307,7 @@ impl Lexer {
     fn violations_from_tokens(tokens: &[Token]) -> Vec<SQLLexError> {
         tokens
             .iter()
-            .filter(|t| t.token_type == "unlexable")
+            .filter(|t| t.token_types[0] == "unlexable")
             .map(|token| {
                 SQLLexError::new(
                     format!(
@@ -686,7 +686,7 @@ pub mod python {
         }
     }
 
-    #[pyclass(name = "SQLLexerError")]
+    #[pyclass(name = "RsSQLLexerError")]
     #[repr(transparent)]
     pub struct PySQLLexError(SQLLexError);
 
@@ -718,7 +718,7 @@ pub mod python {
         }
     }
 
-    #[pyclass(name = "Lexer")]
+    #[pyclass(name = "RsLexer")]
     #[repr(transparent)]
     #[derive(Clone)]
     pub struct PyLexer(pub Lexer);

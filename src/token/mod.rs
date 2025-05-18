@@ -26,7 +26,7 @@ pub enum TupleSerialisedSegment {
 
 #[derive(Debug, Clone)]
 pub struct Token {
-    pub token_type: String,
+    pub token_types: Vec<String>,
     pub class_types: HashSet<String>,
     pub comment_separate: bool,
     pub is_meta: bool,
@@ -122,7 +122,11 @@ impl Token {
     }
 
     pub fn class_types(&self) -> HashSet<String> {
-        self.class_types.clone()
+        self.class_types
+            .clone()
+            .intersection(&self.token_types.iter().cloned().collect::<HashSet<_>>())
+            .cloned()
+            .collect::<HashSet<String>>()
     }
 
     pub fn descendant_type_set(&self) -> HashSet<String> {
@@ -175,10 +179,21 @@ impl Token {
     }
 
     pub fn get_type(&self) -> String {
-        self.token_type.clone()
+        self.token_types[0].clone()
     }
 
     pub fn is_type(&self, seg_types: &[&str]) -> bool {
+        if self
+            .token_types
+            .iter()
+            .cloned()
+            .collect::<HashSet<_>>()
+            .intersection(&seg_types.iter().map(|s| s.to_string()).collect())
+            .count()
+            > 0
+        {
+            return true;
+        }
         self.class_is_type(seg_types)
     }
 
@@ -332,7 +347,17 @@ impl Token {
 
         // Recursively process child segments
         for seg in &self.segments {
-            if !no_recursive_set.contains(seg.token_type.as_str()) {
+            if !no_recursive_set.is_empty()
+                && no_recursive_set
+                    .intersection(
+                        &seg.token_types
+                            .iter()
+                            .map(String::as_str)
+                            .collect::<HashSet<_>>(),
+                    )
+                    .count()
+                    == 0
+            {
                 results.extend(seg.recursive_crawl(
                     seg_types,
                     recurse_into,

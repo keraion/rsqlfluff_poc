@@ -79,7 +79,7 @@ pub mod python {
 
     use super::{RawFileSlice, TemplatedFileSlice};
 
-    #[pyclass(name = "RawFileSlice")]
+    #[pyclass(name = "RsRawFileSlice")]
     #[repr(transparent)]
     #[derive(Clone, Debug, PartialEq, Hash)]
     pub struct PyRawFileSlice(pub(crate) RawFileSlice);
@@ -134,7 +134,7 @@ pub mod python {
         }
     }
 
-    #[pyclass(name = "TemplatedFileSlice")]
+    #[pyclass(name = "RsTemplatedFileSlice")]
     #[repr(transparent)]
     #[derive(Clone, Debug, PartialEq, Hash)]
     pub struct PyTemplatedFileSlice(pub(crate) TemplatedFileSlice);

@@ -251,7 +251,7 @@ pub mod python {
 
     use super::PositionMarker;
 
-    #[pyclass(name = "PositionMarker", str, eq, ord, frozen)]
+    #[pyclass(name = "RsPositionMarker", str, eq, ord, frozen)]
     #[repr(transparent)]
     #[derive(Debug, Clone)]
     pub struct PyPositionMarker(pub PositionMarker);
